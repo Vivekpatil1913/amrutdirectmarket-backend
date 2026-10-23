@@ -107,7 +107,7 @@ test("public site endpoint serves the seeded, published content", async () => {
   const r = await call("GET", "/public/site", { auth: null });
   assert.equal(r.status, 200);
   const { sections, collections } = r.body.data;
-  assert.equal(sections.hero.title_mr, "अमृत पेठ");
+  assert.equal(sections.hero.title_mr, "अमृत पेठ थेट बाजार पेठ");
   assert.match(sections.settings.logo, /^\/uploads\/media\//);
   assert.equal(collections.navItems.length, 5);
   assert.equal(collections.enquirySubjects.length, 6);
@@ -199,20 +199,20 @@ test("validation errors return 422 with field details", async () => {
 
 test("sections: draft does not change the site until published; discard restores", async () => {
   const current = await call("GET", "/admin/sections/hero");
-  const draft = { ...current.body.data.draft, title_en: "AMRUT Peth Draft" };
+  const draft = { ...current.body.data.draft, title_en: "AMRUT Peth Direct Market Draft" };
   const saved = await call("PUT", "/admin/sections/hero", { body: draft });
   assert.equal(saved.status, 200);
   assert.equal(saved.body.data.has_unpublished_changes, true);
   let site = await call("GET", "/public/site", { auth: null });
-  assert.equal(site.body.data.sections.hero.title_en, "AMRUT Peth");
+  assert.equal(site.body.data.sections.hero.title_en, "AMRUT Peth Direct Market");
 
   await call("POST", "/admin/sections/hero/publish");
   site = await call("GET", "/public/site", { auth: null });
-  assert.equal(site.body.data.sections.hero.title_en, "AMRUT Peth Draft");
+  assert.equal(site.body.data.sections.hero.title_en, "AMRUT Peth Direct Market Draft");
 
   await call("PUT", "/admin/sections/hero", { body: { ...draft, title_en: "Discard me" } });
   const discarded = await call("POST", "/admin/sections/hero/discard");
-  assert.equal(discarded.body.data.draft.title_en, "AMRUT Peth Draft");
+  assert.equal(discarded.body.data.draft.title_en, "AMRUT Peth Direct Market Draft");
 
   const invalid = await call("PUT", "/admin/sections/hero", { body: { ...draft, title_mr: "" } });
   assert.equal(invalid.status, 422);

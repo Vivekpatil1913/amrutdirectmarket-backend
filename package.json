@@ -14,7 +14,10 @@
     "db:migrate": "node migrations/migrate.js",
     "db:seed": "node seeds/seed.js",
     "db:setup": "node migrations/migrate.js && node seeds/seed.js",
-    "test": "node --test --test-concurrency=1 \"src/**/*.test.js\" \"test/*.test.js\""
+    "test": "node --test --test-concurrency=1 \"src/**/*.test.js\" \"test/*.test.js\"",
+    "start:prod": "NODE_ENV=production node src/server.js",
+    "db:migrate:prod": "NODE_ENV=production node migrations/migrate.js",
+    "db:seed:prod": "NODE_ENV=production node seeds/seed.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
