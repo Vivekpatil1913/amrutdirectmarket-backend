@@ -241,4 +241,27 @@ export const SEED_COLLECTIONS = {
     { label: "Facebook", url: "https://www.facebook.com/MahaAmrutOfficial/", icon: "facebook" },
     { label: "Instagram", url: "https://www.instagram.com/mahaamrut_official/", icon: "instagram" },
   ],
+  // Templates only: seeded as drafts so nothing invented appears on the public
+  // site. Administrators replace them with real stories and publish.
+  success_stories: [
+    {
+      title_mr: "[नमुना] बचत गटाचा प्रवास", title_en: "[Sample] A self-help group's journey",
+      story_mr: "येथे खरी यशोगाथा लिहा: उद्योजक कोण, थेट बाजार पेठेत काय बदलले, आणि आकडेवारी.",
+      story_en: "Write the real story here: who the entrepreneur is, what changed at the direct market, and the numbers.",
+      person_mr: "उद्योजकाचे नाव", person_en: "Entrepreneur name", place_mr: "जिल्हा", place_en: "District",
+      is_featured: true, status: "draft",
+    },
+    {
+      title_mr: "[नमुना] शेतकरी ते थेट ग्राहक", title_en: "[Sample] From farm to customer",
+      story_mr: "येथे खरी यशोगाथा लिहा.", story_en: "Write the real story here.",
+      person_mr: "उद्योजकाचे नाव", person_en: "Entrepreneur name", place_mr: "जिल्हा", place_en: "District",
+      is_featured: true, status: "draft",
+    },
+    {
+      title_mr: "[नमुना] कारागिराची नवी बाजारपेठ", title_en: "[Sample] An artisan's new market",
+      story_mr: "येथे खरी यशोगाथा लिहा.", story_en: "Write the real story here.",
+      person_mr: "उद्योजकाचे नाव", person_en: "Entrepreneur name", place_mr: "जिल्हा", place_en: "District",
+      is_featured: false, status: "draft",
+    },
+  ],
 };

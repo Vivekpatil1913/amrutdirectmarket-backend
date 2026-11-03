@@ -21,6 +21,12 @@ if (isProd && jwtSecret.length < 32) {
   throw new Error("JWT_SECRET must be set to at least 32 characters in production");
 }
 
+// Key for encrypting Aadhaar numbers at rest (64 hex chars = 32 bytes).
+const aadhaarKey = optional("AADHAAR_ENC_KEY", "");
+if (isProd && !/^[0-9a-f]{64}$/i.test(aadhaarKey)) {
+  throw new Error("AADHAAR_ENC_KEY must be 64 hex characters in production");
+}
+
 const uploadDir = optional("UPLOAD_DIR", "uploads");
 
 export const env = {
@@ -55,6 +61,22 @@ export const env = {
       .split(",")
       .map((o) => o.trim())
       .filter(Boolean),
+  },
+
+  identity: {
+    // Outside production a key is derived from JWT_SECRET so a fresh checkout
+    // works; production refuses to start without a real one (above).
+    aadhaarKey,
+  },
+
+  otp: {
+    ttlMinutes: int("OTP_TTL_MINUTES", 10),
+    maxAttempts: int("OTP_MAX_ATTEMPTS", 5),
+    // Minutes a verified number stays usable for submitting the form.
+    verifiedMinutes: int("OTP_VERIFIED_MINUTES", 30),
+    // Without an SMS gateway the code is returned in the API response; never
+    // enable this in production.
+    devEcho: optional("OTP_DEV_ECHO", isProd ? "false" : "true") === "true",
   },
 
   upload: {

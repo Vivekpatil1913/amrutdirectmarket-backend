@@ -4,6 +4,7 @@ import { conflict, notFound, parseOrThrow } from "../../lib/errors.js";
 import { buildObjectSchema, storedKeys } from "../../lib/fieldSchema.js";
 import { paginationQuery, slugify } from "../../lib/validators.js";
 import { audit } from "../../lib/audit.js";
+import { liveMedia, publicImages, resolveImageRefs } from "../../lib/media.js";
 import { COMMON_FIELDS } from "./collections.config.js";
 
 // Generic data access for content collections. Table and column names are
@@ -16,6 +17,7 @@ export function compile(name, def) {
   const fields = [...def.fields, ...COMMON_FIELDS];
   const columns = fields.flatMap(storedKeys);
   const slugFields = def.fields.filter((f) => f.type === "slug");
+  const imageKeys = def.fields.filter((f) => f.type === "image").map((f) => f.key);
   const sorts = [...new Set([...SYSTEM_SORTS, def.titleField])];
   const filterShape = Object.fromEntries(
     def.filters.map((col) => {
@@ -30,6 +32,7 @@ export function compile(name, def) {
     fields,
     columns,
     slugFields,
+    imageKeys,
     schema: buildObjectSchema(fields),
     listQuery: z.object({
       ...paginationQuery,
@@ -117,8 +120,14 @@ export async function getById(c, id, { includeDeleted = false } = {}) {
   return row;
 }
 
+// Validates a submitted record; image fields must reference live media.
+async function prepare(c, body, excludeId) {
+  const data = await prepareUnique(c, parseOrThrow(c.schema, body), excludeId);
+  return c.imageKeys.length ? resolveImageRefs(data, c.imageKeys) : data;
+}
+
 export async function create(c, body, user) {
-  const data = await prepareUnique(c, parseOrThrow(c.schema, body), null);
+  const data = await prepare(c, body, null);
   const cols = [...c.columns, "created_by", "updated_by"];
   const values = [...c.columns.map((k) => data[k]), user.id, user.id];
   const row = await transaction(async (tx) => {
@@ -135,7 +144,7 @@ export async function create(c, body, user) {
 
 export async function update(c, id, body, user) {
   await getById(c, id);
-  const data = await prepareUnique(c, parseOrThrow(c.schema, body), id);
+  const data = await prepare(c, body, id);
   const sets = c.columns.map((k, i) => `${k} = $${i + 1}`);
   await transaction(async (tx) => {
     await tx.query(
@@ -189,13 +198,17 @@ export async function restore(c, id, user) {
 }
 
 // Published, live records in display order, without admin bookkeeping columns.
+// Image fields become their current url (or null once the media is deleted).
 export async function listPublic(c) {
   const cols = ["id", ...c.columns.filter((k) => k !== "status")];
-  return query(
+  const rows = await query(
     `SELECT ${cols.join(", ")} FROM ${c.table}
       WHERE deleted_at IS NULL AND status = 'published'
       ORDER BY display_order ASC, id ASC`
   );
+  if (!c.imageKeys.length) return rows;
+  const media = await liveMedia(rows.flatMap((r) => c.imageKeys.map((k) => r[k]?.media_id)));
+  return rows.map((r) => publicImages(r, c.imageKeys, media));
 }
 
 export async function counts(c) {

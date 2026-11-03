@@ -136,3 +136,47 @@ Files are served from `/uploads/media/<file>` (no directory listing, `nosniff`).
 ### Activity log — `/admin/activity` (admin)
 
 Read-only audit trail: `GET` with `search`, `action`, `entity`.
+
+---
+
+## Thet Bajar Peth
+
+**Roles:** `district_manager` is outside the CMS hierarchy: it has no website CMS access and works only in the portal routes below, confined to the one district assigned in `admin_users.district_id` (required for the role). `superadmin` uses the same routes across every district. A manager asking for another district's record gets `404`.
+
+### Public
+
+| Method | Path | Description |
+|---|---|---|
+| GET | `/public/thet-bajar` | Home data: `stats` (total / live / upcoming events, districts covered, vendors), live + upcoming `events` (with `quotas`, `bookable`), active `districts` (lat/lng, `event_ids`) and approved `sponsors`. |
+| GET | `/public/events?district=<code>&phase=current\|past` | Published events. |
+| GET | `/public/events/:id` | One event with its `gallery`. |
+| GET | `/public/events/:id/slots` | Live availability: `{ quotas: { general, ews }, available, total, state: open\|waitlist\|closed }`. `Cache-Control: no-store`. |
+| GET | `/public/forms/vendor_registration` | Custom questions added by the form builder. |
+| POST | `/public/otp/send` | `{ phone }` → `{ request_id, expires_at, dev_code? }`. 30 s between codes, 5 per 15 min per number. `dev_code` only while `OTP_DEV_ECHO=true` (no SMS gateway yet). |
+| POST | `/public/otp/verify` | `{ request_id, phone, code }` → `{ otp_token }`. 5 wrong attempts per code. |
+| POST | `/public/registrations` | Stall application (below). → `201 { reference_no, status: pending\|waitlisted, available }`. |
+
+Registration body: `event_id`, `quota_type` (`general` \| `ews`), `name`, `business_name`, `nature_of_business`, `category_id` (published category), `aadhaar` (12 digits, Verhoeff checksum), `udyam_number` (`UDYAM-XX-00-0000000`), `caste_category` (`open|ews|obc|sc|st|vjnt|sbc`; the EWS quota requires a category other than `open`), `phone` + `otp_token` (verified within `OTP_VERIFIED_MINUTES`, single use), `email?`, `extra` (answers to form-builder fields), `consent: true`, `language`, `website` (honeypot).
+
+**Slots:** each event has `general`, `ews` and `sponsored` quotas. A booking runs `UPDATE … SET available = available - 1 WHERE available > 0` inside its transaction: it gets a slot (`pending`) or is `waitlisted`. `pending` and `approved` hold a slot; moving to `rejected` / `cancelled` / `waitlisted` (or deleting) releases it and the oldest waitlisted application of that quota is promoted. One open application per Aadhaar per event (`409`). Aadhaar is stored AES-256-GCM encrypted (`AADHAAR_ENC_KEY`), shown as `XXXX XXXX 1234`.
+
+### Portal (district manager: own district · super admin: all)
+
+| Method | Path | Description |
+|---|---|---|
+| GET | `/admin/portal/meta` | Option lists for the portal forms. |
+| GET | `/admin/districts` | Districts (any signed-in user). `POST` / `PUT /:id` / `DELETE /:id` super admin only. |
+| GET/POST | `/admin/events` | List (`district`, `status`, `phase`, `search`) / create with `quotas: { general, ews, sponsored }`. A manager's events always go to their district. |
+| GET/PUT/DELETE | `/admin/events/:id` | Quotas cannot go below the stalls already allocated (`422 quotas.<type>`); growing a quota promotes waitlisted applicants. Events with applications cannot be deleted (`409`). |
+| GET/POST | `/admin/registrations` | Applicant CRM list (`event`, `status`, `quota`, `search`) / add an application without OTP (e.g. a `sponsored` stall nominee). |
+| GET/PATCH/DELETE | `/admin/registrations/:id` | `{ status?, dm_notes?, udyam_verified? }`; `409` when approving without a free slot. |
+| POST | `/admin/registrations/:id/reveal-aadhaar` | Super admin only; audited as `reveal`. |
+| GET/POST | `/admin/sponsors` | List (`status`, `district`) / create (always `draft`). `?status=pending` is the moderation queue (oldest request first). |
+| PUT/DELETE | `/admin/sponsors/:id` | A manager cannot edit while `pending`; editing an `approved` sponsor returns it to `draft`. |
+| POST | `/admin/sponsors/:id/request-approval` | `draft|rejected` → `pending`. |
+| POST | `/admin/sponsors/:id/review` | Super admin: `{ decision: approved\|rejected, note }` (note required to reject). |
+| GET | `/admin/event-media?event_id=` | Event gallery. `POST /upload` (multipart `file`, `event_id?`, `caption?`) also serves cover and logo uploads. `DELETE /:id`. |
+| GET | `/admin/analytics` | GIS report: per-district events, stalls, applicants, sponsors with lat/lng, plus totals, status / caste / quota splits and a 12-month trend. |
+| GET/PUT | `/admin/forms/vendor_registration` | Super admin form builder: `{ title, fields: [{ key, label_mr, label_en, type: text\|textarea\|number\|select\|checkbox\|date, required, options, max }] }`. |
+
+Content collection `success-stories` (`/admin/success-stories`, public key `successStories`) holds the home-page carousel; `is_featured` stories become the two highlight banners. Collections now support `image` fields.

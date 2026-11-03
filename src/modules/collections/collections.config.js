@@ -127,6 +127,22 @@ export const COLLECTIONS = {
     search: ["label", "url"],
     filters: [],
   },
+  "success-stories": {
+    table: "success_stories",
+    entity: "Success story",
+    publicKey: "successStories",
+    titleField: "title_en",
+    fields: [
+      { key: "title", label: "Title", type: "text", bi: true, required: true, max: 120 },
+      { key: "story", label: "Story", type: "textarea", bi: true, max: 1200 },
+      { key: "person", label: "Entrepreneur", type: "text", bi: true, max: 100 },
+      { key: "place", label: "Place / district", type: "text", bi: true, max: 100 },
+      { key: "image", label: "Photo", type: "image" },
+      { key: "is_featured", label: "Feature as a home-page highlight banner", type: "boolean", default: false },
+    ],
+    search: ["title_mr", "title_en", "person_mr", "person_en", "place_mr", "place_en"],
+    filters: [],
+  },
 };
 
 export const COLLECTION_NAMES = Object.keys(COLLECTIONS);

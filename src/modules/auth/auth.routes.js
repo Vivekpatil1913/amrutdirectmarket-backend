@@ -48,6 +48,7 @@ export const publicUser = (u) => ({
   name: u.name,
   role: u.role,
   avatarUrl: u.avatar_url ?? null,
+  districtId: u.district_id ?? null,
 });
 
 // A real bcrypt hash compared when the email is unknown, so response time does
@@ -63,7 +64,7 @@ router.post(
     const { email, password } = parsed.data;
 
     const user = await queryOne(
-      `SELECT id, email, name, role, avatar_url, password_hash, is_active, failed_attempts, locked_until
+      `SELECT id, email, name, role, avatar_url, district_id, password_hash, is_active, failed_attempts, locked_until
          FROM admin_users WHERE LOWER(email) = $1 AND deleted_at IS NULL`,
       [email]
     );
@@ -151,7 +152,7 @@ router.put(
     if (taken) throw conflict("That email address is already in use", "email");
     const user = await queryOne(
       `UPDATE admin_users SET name = $1, email = $2, updated_at = NOW()
-        WHERE id = $3 RETURNING id, email, name, role, avatar_url`,
+        WHERE id = $3 RETURNING id, email, name, role, avatar_url, district_id`,
       [data.name, data.email, req.user.id]
     );
     await audit(req.user, "update", "profile", req.user.id, "Updated own profile");

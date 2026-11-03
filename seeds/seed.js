@@ -81,7 +81,7 @@ async function seedCollections(log) {
     const { rows: c } = await pool.query(`SELECT COUNT(*) AS count FROM ${table}`);
     if (c[0].count > 0) continue;
     for (const [i, row] of rows.entries()) {
-      const record = { ...row, display_order: (i + 1) * 10, status: "published" };
+      const record = { display_order: (i + 1) * 10, status: "published", ...row };
       const cols = Object.keys(record);
       await pool.query(
         `INSERT INTO ${table} (${cols.join(", ")}) VALUES (${cols.map((_, n) => `$${n + 1}`).join(", ")})`,

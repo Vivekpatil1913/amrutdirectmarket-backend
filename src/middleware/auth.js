@@ -16,7 +16,7 @@ export async function attachUser(req, _res, next) {
 
     const payload = jwt.verify(token, env.jwt.secret);
     const session = await queryOne(
-      `SELECT s.id, s.expires_at, u.id AS user_id, u.email, u.name, u.role, u.avatar_url
+      `SELECT s.id, s.expires_at, u.id AS user_id, u.email, u.name, u.role, u.avatar_url, u.district_id
          FROM admin_sessions s
          JOIN admin_users u ON u.id = s.user_id
         WHERE s.id = $1 AND s.revoked_at IS NULL
@@ -38,6 +38,7 @@ export async function attachUser(req, _res, next) {
       name: session.name,
       role: session.role,
       avatarUrl: session.avatar_url,
+      districtId: session.district_id,
     };
   } catch {
     // Invalid / expired token — continue unauthenticated.
@@ -50,7 +51,8 @@ export const requireAuth = asyncHandler(async (req, _res, next) => {
   next();
 });
 
-// Role hierarchy: superadmin > admin > editor.
+// CMS role hierarchy: superadmin > admin > editor. A district_manager is
+// outside it (rank 0): no website CMS access, only the district portal.
 const RANK = { editor: 1, admin: 2, superadmin: 3 };
 
 export function requireRole(minRole) {
@@ -65,3 +67,17 @@ export function requireRole(minRole) {
 export const requireEditor = requireRole("editor");
 export const requireAdmin = requireRole("admin");
 export const requireSuperadmin = requireRole("superadmin");
+
+// Thet Bajar Peth portal: district managers (their own district) and super
+// admins (every district).
+export const requirePortal = asyncHandler(async (req, _res, next) => {
+  if (!req.user) throw unauthorized();
+  if (req.user.role !== "district_manager" && req.user.role !== "superadmin") throw forbidden();
+  next();
+});
+
+// The district a portal request is confined to: the manager's own, or null
+// (all districts) for a super admin.
+export function districtScope(req) {
+  return req.user?.role === "district_manager" ? req.user.districtId : null;
+}
