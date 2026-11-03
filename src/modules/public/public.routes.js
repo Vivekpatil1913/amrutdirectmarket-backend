@@ -1,6 +1,8 @@
 import { Router } from "express";
 import { z } from "zod";
-import { queryOne } from "../../db/pool.js";
+import rateLimit from "express-rate-limit";
+import { query, queryOne } from "../../db/pool.js";
+import { env } from "../../config/env.js";
 import { asyncHandler, notFound, parseOrThrow, success } from "../../lib/errors.js";
 import { idParam } from "../../lib/validators.js";
 import { COMPILED } from "../collections/collections.routes.js";
@@ -40,32 +42,75 @@ router.get("/sections/:key", asyncHandler(async (req, res) => {
 
 // ── Thet Bajar Peth ──────────────────────────────────────────────────────
 
-// The home page's live data: headline counts, live and upcoming events with
-// their stall availability, districts for the map and approved sponsors.
+// Home-page statistics. Total events counts the approved events completed
+// to date; participants are the vendors whose stall was approved; visitors
+// is the site counter (it starts at a base of one million).
+async function homeStats() {
+  return queryOne(
+    `SELECT COUNT(*) FILTER (WHERE (${events.PHASE_SQL}) = 'completed')::int AS total_events,
+            COUNT(*) FILTER (WHERE (${events.PHASE_SQL}) = 'live')::int AS live_events,
+            COUNT(*) FILTER (WHERE (${events.PHASE_SQL}) = 'upcoming')::int AS upcoming_events,
+            COUNT(DISTINCT e.district_id)::int AS districts_covered,
+            (SELECT COUNT(*) FROM vendor_registrations r JOIN events x ON x.id = r.event_id
+              WHERE r.deleted_at IS NULL AND x.deleted_at IS NULL AND r.status = 'approved')::int AS total_participants,
+            (SELECT value FROM site_counters WHERE key = 'visitors')::bigint AS total_visitors
+       FROM events e WHERE ${events.PUBLIC_WHERE}`
+  );
+}
+
+// Events organised per district (every approved event that was not
+// cancelled, past or upcoming): the map's pointers show this count.
+async function eventCountsByDistrict() {
+  const rows = await query(
+    `SELECT e.district_id, COUNT(*)::int AS n FROM events e
+      WHERE ${events.PUBLIC_WHERE} GROUP BY e.district_id`
+  );
+  return new Map(rows.map((r) => [r.district_id, r.n]));
+}
+
+// The home page's live data: statistics, the latest events' highlights, live
+// and upcoming events with their stall availability, districts for the map
+// and approved sponsors.
 router.get("/thet-bajar", asyncHandler(async (_req, res) => {
-  const [stats, upcoming, districts, sponsors] = await Promise.all([
-    queryOne(
-      `SELECT COUNT(*)::int AS total_events,
-              COUNT(*) FILTER (WHERE (${events.PHASE_SQL}) = 'live')::int AS live_events,
-              COUNT(*) FILTER (WHERE (${events.PHASE_SQL}) = 'upcoming')::int AS upcoming_events,
-              COUNT(DISTINCT e.district_id)::int AS districts_covered,
-              (SELECT COUNT(*) FROM vendor_registrations r JOIN events x ON x.id = r.event_id
-                WHERE r.deleted_at IS NULL AND x.deleted_at IS NULL AND r.status IN ('pending', 'approved'))::int AS vendors
-         FROM events e WHERE e.deleted_at IS NULL AND e.status = 'published'`
-    ),
-    events.listPublic({ limit: 12 }),
+  const [stats, highlights, upcoming, districts, counts, sponsors] = await Promise.all([
+    homeStats(),
+    events.latestHighlights(2),
+    events.listPublic({ limit: 24 }),
     listDistricts({ activeOnly: true }),
+    eventCountsByDistrict(),
     publicSponsors(),
   ]);
   const byDistrict = new Map();
   for (const e of upcoming) byDistrict.set(e.district_id, [...(byDistrict.get(e.district_id) ?? []), e.id]);
   res.set("Cache-Control", "no-cache");
   return success(res, {
-    stats,
+    stats: { ...stats, total_visitors: Number(stats.total_visitors ?? 0) },
+    highlights,
     events: upcoming,
-    districts: districts.map((d) => ({ ...d, event_ids: byDistrict.get(d.id) ?? [] })),
+    districts: districts.map((d) => ({ ...d, event_ids: byDistrict.get(d.id) ?? [], event_count: counts.get(d.id) ?? 0 })),
     sponsors,
   });
+}));
+
+// The site counts a visit once per browser session (the site remembers
+// that it did); limited per connection so the counter cannot be pumped.
+const visitLimit = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: env.isTest ? 1000 : 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  handler: async (_req, res) => {
+    const row = await queryOne("SELECT value FROM site_counters WHERE key = 'visitors'");
+    return success(res, { total_visitors: Number(row?.value ?? 0), counted: false });
+  },
+});
+
+router.post("/visits", visitLimit, asyncHandler(async (_req, res) => {
+  const row = await queryOne(
+    `UPDATE site_counters SET value = value + 1, updated_at = NOW() WHERE key = 'visitors' RETURNING value`
+  );
+  res.set("Cache-Control", "no-store");
+  return success(res, { total_visitors: Number(row?.value ?? 0), counted: true });
 }));
 
 const eventsQuery = z.object({

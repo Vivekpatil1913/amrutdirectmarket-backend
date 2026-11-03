@@ -139,24 +139,27 @@ Read-only audit trail: `GET` with `search`, `action`, `entity`.
 
 ---
 
-## Thet Bajar Peth
+## Bajar Peth
 
 **Roles:** `district_manager` is outside the CMS hierarchy: it has no website CMS access and works only in the portal routes below, confined to the one district assigned in `admin_users.district_id` (required for the role). `superadmin` uses the same routes across every district. A manager asking for another district's record gets `404`.
+
+**Event approval:** an event a district manager creates or edits is `approval_status: pending` and stays off the website until a super admin approves it (`POST /admin/events/:id/review`). A super admin's own events are approved at once. Public = `status = published` **and** `approval_status = approved`.
 
 ### Public
 
 | Method | Path | Description |
 |---|---|---|
-| GET | `/public/thet-bajar` | Home data: `stats` (total / live / upcoming events, districts covered, vendors), live + upcoming `events` (with `quotas`, `bookable`), active `districts` (lat/lng, `event_ids`) and approved `sponsors`. |
-| GET | `/public/events?district=<code>&phase=current\|past` | Published events. |
+| GET | `/public/thet-bajar` | Home data: `stats` (`total_events` = approved events completed to date, `total_participants` = approved stall bookings, `total_visitors` = visitor counter, plus live / upcoming counts), `highlights` (the latest two events that have started, newest first), live + upcoming `events` (with `quotas`, `bookable`, `city`, `event_time`, `venue_map_link`), active `districts` (lat/lng, `event_ids` of upcoming events, `event_count` = every approved event organised there) and `sponsors` (approved sponsors, then sponsors named on approved events). |
+| POST | `/public/visits` | Counts a visit; `{ total_visitors, counted }`. The counter starts at 1,000,000. Limited to 20 per connection per hour (beyond that the total is returned uncounted). |
+| GET | `/public/events?district=<code>&phase=current\|past` | Public events. |
 | GET | `/public/events/:id` | One event with its `gallery`. |
 | GET | `/public/events/:id/slots` | Live availability: `{ quotas: { general, ews }, available, total, state: open\|waitlist\|closed }`. `Cache-Control: no-store`. |
-| GET | `/public/forms/vendor_registration` | Custom questions added by the form builder. |
-| POST | `/public/otp/send` | `{ phone }` → `{ request_id, expires_at, dev_code? }`. 30 s between codes, 5 per 15 min per number. `dev_code` only while `OTP_DEV_ECHO=true` (no SMS gateway yet). |
-| POST | `/public/otp/verify` | `{ request_id, phone, code }` → `{ otp_token }`. 5 wrong attempts per code. |
-| POST | `/public/registrations` | Stall application (below). → `201 { reference_no, status: pending\|waitlisted, available }`. |
+| GET | `/public/forms/vendor_registration` | The stall booking form definition (every field, in order). |
+| POST | `/public/registrations` | Stall booking (below). → `201 { reference_no, status: pending\|waitlisted, available }`. |
 
-Registration body: `event_id`, `quota_type` (`general` \| `ews`), `name`, `business_name`, `nature_of_business`, `category_id` (published category), `aadhaar` (12 digits, Verhoeff checksum), `udyam_number` (`UDYAM-XX-00-0000000`), `caste_category` (`open|ews|obc|sc|st|vjnt|sbc`; the EWS quota requires a category other than `open`), `phone` + `otp_token` (verified within `OTP_VERIFIED_MINUTES`, single use), `email?`, `extra` (answers to form-builder fields), `consent: true`, `language`, `website` (honeypot).
+**Booking request:** `multipart/form-data` with a `payload` field holding the JSON answers and one file part per file field, named by its key (e.g. `caste_certificate`); a plain JSON body is accepted when there are no files. Files: PDF, JPEG or PNG, content checked against the declared type, at most `MAX_FILE_SIZE_MB`; they are stored under `UPLOAD_DIR/private/bookings`, never served publicly, and removed again when a booking is refused.
+
+Payload: `event_id`, `name`, `business_name`, `nature_of_business` (an option value of that field), `product_categories` (ids of published categories, at least one), `aadhaar` (digits only, 12, Verhoeff checksum), `caste_category` (`open|ews|obc|sc|st|vjnt|sbc`), `caste_name` + `caste_certificate` file (required for every category except `open`), `phone` / `email` / `udyam_number` (as the form builder configures them), `extra` (answers to custom fields), `consent: true`, `language`, `website` (honeypot). The stall type is assigned: EWS / reserved categories take an EWS stall while one is free, then a general one; everyone else takes a general stall.
 
 **Slots:** each event has `general`, `ews` and `sponsored` quotas. A booking runs `UPDATE … SET available = available - 1 WHERE available > 0` inside its transaction: it gets a slot (`pending`) or is `waitlisted`. `pending` and `approved` hold a slot; moving to `rejected` / `cancelled` / `waitlisted` (or deleting) releases it and the oldest waitlisted application of that quota is promoted. One open application per Aadhaar per event (`409`). Aadhaar is stored AES-256-GCM encrypted (`AADHAAR_ENC_KEY`), shown as `XXXX XXXX 1234`.
 
@@ -166,17 +169,19 @@ Registration body: `event_id`, `quota_type` (`general` \| `ews`), `name`, `busin
 |---|---|---|
 | GET | `/admin/portal/meta` | Option lists for the portal forms. |
 | GET | `/admin/districts` | Districts (any signed-in user). `POST` / `PUT /:id` / `DELETE /:id` super admin only. |
-| GET/POST | `/admin/events` | List (`district`, `status`, `phase`, `search`) / create with `quotas: { general, ews, sponsored }`. A manager's events always go to their district. |
-| GET/PUT/DELETE | `/admin/events/:id` | Quotas cannot go below the stalls already allocated (`422 quotas.<type>`); growing a quota promotes waitlisted applicants. Events with applications cannot be deleted (`409`). |
-| GET/POST | `/admin/registrations` | Applicant CRM list (`event`, `status`, `quota`, `search`) / add an application without OTP (e.g. a `sponsored` stall nominee). |
-| GET/PATCH/DELETE | `/admin/registrations/:id` | `{ status?, dm_notes?, udyam_verified? }`; `409` when approving without a free slot. |
+| GET/POST | `/admin/events` | List (`district`, `status`, `phase`, `approval`, `search`, `sort=submitted_at` for the queue) / create. Body: `title_mr`\*, `title_en`, `start_date`\*, `end_date`\*, `venue_mr`\*, `venue_en`, `city_mr`, `city_en`, `district_id` (super admin only; a manager's events go to their district), `sponsor_name`, `sponsor_logo_media_id`, `venue_map_link`\* (http/https), `total_stalls`\* (stall availability, 1–10000), `quotas: { ews, sponsored }` (carved out of the total; the rest are general), `event_time`\*, `cover_media_id` (event photo), `contact_phone`\* (mobile), `description_*`, `status`, `registration_open`. |
+| GET/PUT/DELETE | `/admin/events/:id` | Quotas cannot go below the stalls already allocated (`422 quotas.<type>`); growing a quota promotes waitlisted applicants. A manager's edit sends the event back to `pending`. Events with applications cannot be deleted (`409`). |
+| POST | `/admin/events/:id/review` | Super admin: `{ decision: approved\|rejected, note }` (note required to reject); audited. |
+| GET/POST | `/admin/registrations` | Applicant CRM list (`event`, `status`, `quota`, `search`) / add a booking for a verified applicant (e.g. a `sponsored` stall nominee; `quota_type` chosen, no documents). |
+| GET/PATCH/DELETE | `/admin/registrations/:id` | `{ status?, dm_notes?, udyam_verified? }`; `409` when approving without a free slot. Records list `files` by name and size; password answers are masked. |
+| GET | `/admin/registrations/:id/files/:key` | Downloads an uploaded document (e.g. `caste_certificate`) as an attachment; audited as `download`. |
 | POST | `/admin/registrations/:id/reveal-aadhaar` | Super admin only; audited as `reveal`. |
 | GET/POST | `/admin/sponsors` | List (`status`, `district`) / create (always `draft`). `?status=pending` is the moderation queue (oldest request first). |
 | PUT/DELETE | `/admin/sponsors/:id` | A manager cannot edit while `pending`; editing an `approved` sponsor returns it to `draft`. |
 | POST | `/admin/sponsors/:id/request-approval` | `draft|rejected` → `pending`. |
 | POST | `/admin/sponsors/:id/review` | Super admin: `{ decision: approved\|rejected, note }` (note required to reject). |
-| GET | `/admin/event-media?event_id=` | Event gallery. `POST /upload` (multipart `file`, `event_id?`, `caption?`) also serves cover and logo uploads. `DELETE /:id`. |
+| GET | `/admin/event-media?event_id=` | Event gallery. `POST /upload` (multipart `file`, `event_id?`, `caption?`) also serves event photo and logo uploads. `DELETE /:id`. |
 | GET | `/admin/analytics` | GIS report: per-district events, stalls, applicants, sponsors with lat/lng, plus totals, status / caste / quota splits and a 12-month trend. |
-| GET/PUT | `/admin/forms/vendor_registration` | Super admin form builder: `{ title, fields: [{ key, label_mr, label_en, type: text\|textarea\|number\|select\|checkbox\|date, required, options, max }] }`. |
+| GET/PUT | `/admin/forms/vendor_registration` | Super admin form builder: `{ title, fields: [{ key, label_mr, label_en, type, required, enabled, placeholder, options, max }] }`. Types: `text`, `email`, `phone`, `number`, `pan`, `date`, `textarea`, `select` (dropdown), `radio`, `checkbox` (a group with options, a single tick box without), `file`, `password` (stored as a bcrypt hash), `url` (link). System fields (`name`, `business_name`, `nature_of_business`, `product_categories`, `aadhaar`, `caste_category`, `caste_name`, `caste_certificate`, `phone`, `email`, `udyam_number`) are always kept and keep their type; the first eight are always mandatory, the last three can be made optional or hidden. |
 
-Content collection `success-stories` (`/admin/success-stories`, public key `successStories`) holds the home-page carousel; `is_featured` stories become the two highlight banners. Collections now support `image` fields.
+Content collection `success-stories` (`/admin/success-stories`, public key `successStories`) holds the landing carousel (photo, story, person and district in `place_*`); until one is published the carousel shows the latest events. Collections support `image` fields.

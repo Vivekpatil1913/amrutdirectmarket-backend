@@ -28,7 +28,6 @@ export const SECTIONS = [
       { key: "notice_enabled", label: "Show notice in the government bar", type: "boolean", group: "Notice bar" },
       { key: "notice_text", label: "Notice text", type: "text", bi: true, max: 200, group: "Notice bar" },
       { key: "notice_short", label: "Notice short label (mobile)", type: "text", bi: true, max: 40, group: "Notice bar" },
-      { key: "header_cta", label: "Header button label", type: "text", bi: true, required: true, max: 40, group: "Header" },
       { key: "site_title", label: "Browser / SEO title", type: "text", bi: true, required: true, max: 120, group: "SEO" },
       { key: "meta_description", label: "Meta description", type: "textarea", bi: true, max: 300, group: "SEO" },
       { key: "meta_keywords", label: "Meta keywords", type: "text", max: 300, group: "SEO", hint: "Comma-separated." },

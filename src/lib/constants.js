@@ -4,11 +4,11 @@
 // public site renders; adding one here without a matching section on the site
 // would produce a dead link.
 export const SECTION_TARGETS = [
-  { value: "home", label: "Home (hero)" },
-  { value: "about", label: "About AMRUT Peth" },
-  { value: "highlights", label: "Highlights" },
+  { value: "home", label: "Home (success stories)" },
+  { value: "highlights", label: "Event highlights" },
+  { value: "events", label: "Upcoming events" },
   { value: "participate", label: "Participation" },
-  { value: "register", label: "Registration / Contact" },
+  { value: "map", label: "District map" },
 ];
 export const SECTION_TARGET_VALUES = SECTION_TARGETS.map((t) => t.value);
 
@@ -25,6 +25,9 @@ export const ROLES = ["superadmin", "admin", "editor", "district_manager"];
 
 // ── Thet Bajar Peth ──────────────────────────────────────────────────────────
 export const EVENT_STATUSES = ["draft", "published", "cancelled"];
+// District managers' events reach the public site only once a super admin
+// approves them.
+export const EVENT_APPROVAL_STATUSES = ["pending", "approved", "rejected"];
 // Stall inventory buckets per event. Sponsored stalls are allocated by the
 // district manager; the public form books general or EWS stalls only.
 export const QUOTA_TYPES = ["general", "ews", "sponsored"];
@@ -37,4 +40,10 @@ export const REGISTRATION_STATUSES = ["pending", "approved", "rejected", "waitli
 export const SLOT_HOLDING_STATUSES = ["pending", "approved"];
 export const SPONSOR_STATUSES = ["draft", "pending", "approved", "rejected"];
 export const SPONSOR_TIERS = ["title", "gold", "silver", "partner"];
-export const FORM_FIELD_TYPES = ["text", "textarea", "number", "select", "checkbox", "date"];
+// Field types of the form builder. "select" is a dropdown; "checkbox" with
+// options is a checkbox group, without options a single tick box.
+export const FORM_FIELD_TYPES = [
+  "text", "email", "phone", "number", "pan", "date", "textarea", "select", "radio", "checkbox", "file", "password", "url",
+];
+// Uploads accepted by file fields of the public booking form.
+export const BOOKING_FILE_TYPES = { "application/pdf": ".pdf", "image/jpeg": ".jpg", "image/png": ".png" };

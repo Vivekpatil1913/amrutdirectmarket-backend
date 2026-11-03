@@ -28,12 +28,12 @@ router.get("/", requirePortal, asyncHandler(async (req, res) => {
            SELECT e.district_id, COUNT(*) AS events,
                   COUNT(*) FILTER (WHERE (${PHASE_SQL}) = 'live') AS live,
                   COUNT(*) FILTER (WHERE (${PHASE_SQL}) = 'upcoming') AS upcoming
-             FROM events e WHERE e.deleted_at IS NULL AND e.status = 'published' GROUP BY e.district_id
+             FROM events e WHERE e.deleted_at IS NULL AND e.status = 'published' AND e.approval_status = 'approved' GROUP BY e.district_id
          ) ev ON ev.district_id = d.id
          LEFT JOIN (
            SELECT e.district_id, SUM(q.total) AS total, SUM(q.available) AS available
              FROM event_stall_quotas q JOIN events e ON e.id = q.event_id
-            WHERE e.deleted_at IS NULL AND e.status = 'published' GROUP BY e.district_id
+            WHERE e.deleted_at IS NULL AND e.status = 'published' AND e.approval_status = 'approved' GROUP BY e.district_id
          ) st ON st.district_id = d.id
          LEFT JOIN (
            SELECT e.district_id, COUNT(*) AS applicants,
@@ -65,7 +65,7 @@ router.get("/", requirePortal, asyncHandler(async (req, res) => {
     query(
       `SELECT q.quota_type, SUM(q.total)::int AS total, SUM(q.total - q.available)::int AS booked
          FROM event_stall_quotas q JOIN events e ON e.id = q.event_id
-        WHERE e.deleted_at IS NULL AND e.status = 'published' AND ($1::int IS NULL OR e.district_id = $1)
+        WHERE e.deleted_at IS NULL AND e.status = 'published' AND e.approval_status = 'approved' AND ($1::int IS NULL OR e.district_id = $1)
         GROUP BY q.quota_type ORDER BY q.quota_type`,
       [scope]
     ),

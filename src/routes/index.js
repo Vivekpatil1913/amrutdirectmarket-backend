@@ -4,7 +4,7 @@ import { asyncHandler, success } from "../lib/errors.js";
 import { requireEditor, requirePortal } from "../middleware/auth.js";
 import { env } from "../config/env.js";
 import {
-  CASTE_CATEGORIES, ENQUIRY_STATUSES, EVENT_STATUSES, EWS_ELIGIBLE_CASTES, FORM_FIELD_TYPES, ICONS, QUOTA_TYPES,
+  CASTE_CATEGORIES, ENQUIRY_STATUSES, EVENT_APPROVAL_STATUSES, EVENT_STATUSES, EWS_ELIGIBLE_CASTES, FORM_FIELD_TYPES, ICONS, QUOTA_TYPES,
   REGISTRATION_STATUSES, ROLES, SECTION_TARGETS, SPONSOR_STATUSES, SPONSOR_TIERS,
 } from "../lib/constants.js";
 import authRoutes from "../modules/auth/auth.routes.js";
@@ -19,7 +19,6 @@ import dashboardRoutes from "../modules/dashboard/dashboard.routes.js";
 import publicRoutes from "../modules/public/public.routes.js";
 import districtRoutes from "../modules/districts/districts.routes.js";
 import eventRoutes from "../modules/events/events.routes.js";
-import otpRoutes from "../modules/otp/otp.routes.js";
 import { adminRegistrations, publicRegistrations } from "../modules/registrations/registrations.routes.js";
 import sponsorRoutes from "../modules/sponsors/sponsors.routes.js";
 import eventMediaRoutes from "../modules/event-media/eventMedia.routes.js";
@@ -46,7 +45,6 @@ export function buildRouter() {
   // ── Public (website) ─────────────────────────────────────────────────────
   router.use("/public", publicRoutes);
   router.use("/public/enquiries", publicEnquiries);
-  router.use("/public/otp", otpRoutes);
   router.use("/public/registrations", publicRegistrations);
   router.use("/public/forms", publicForms);
   for (const [name, c] of Object.entries(COMPILED)) router.use(`/public/${name}`, publicRouter(c));
@@ -81,6 +79,7 @@ export function buildRouter() {
   router.get("/admin/portal/meta", requirePortal, (_req, res) =>
     success(res, {
       eventStatuses: EVENT_STATUSES,
+      eventApprovalStatuses: EVENT_APPROVAL_STATUSES,
       quotaTypes: QUOTA_TYPES,
       casteCategories: CASTE_CATEGORIES,
       ewsEligibleCastes: EWS_ELIGIBLE_CASTES,

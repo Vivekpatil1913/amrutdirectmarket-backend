@@ -1,9 +1,10 @@
-// End-to-end tests for the Thet Bajar Peth features (events, stall slots,
-// OTP-verified registration, role-based portals, sponsors, form builder,
+// End-to-end tests for the Bajar Peth features (event creation with super
+// admin approval, stall slots, the form-builder driven stall booking with
+// document uploads, role-based portals, sponsors, home statistics,
 // analytics) against their own throwaway database.
 import test, { after, before } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync } from "fs";
+import { existsSync, mkdtempSync, readdirSync } from "fs";
 import os from "os";
 import path from "path";
 import pg from "pg";
@@ -17,16 +18,17 @@ process.env.LOG_REQUESTS = "false";
 process.env.SEED_ADMIN_EMAIL = "admin@test.local";
 process.env.SEED_ADMIN_PASSWORD = "Admin@12345";
 process.env.UPLOAD_DIR = mkdtempSync(path.join(os.tmpdir(), "ap-tbp-uploads-"));
-process.env.OTP_DEV_ECHO = "true";
+const BOOKING_DIR = path.join(process.env.UPLOAD_DIR, "private", "bookings");
 
 const PNG_1PX = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
   "base64"
 );
+const PDF = Buffer.from("%PDF-1.4\n1 0 obj << >> endobj\ntrailer << >>\n%%EOF\n");
 
 let server, base, pool, verhoeffValid;
 let admin, pune, nashik; // tokens
-let districts, categoryId, eventId;
+let districts, categoryIds, eventId;
 
 async function call(method, url, { body, auth = admin, form } = {}) {
   const headers = {};
@@ -37,8 +39,9 @@ async function call(method, url, { body, auth = admin, form } = {}) {
     headers,
     body: form ?? (body === undefined ? undefined : JSON.stringify(body)),
   });
-  const json = await res.json().catch(() => ({}));
-  return { status: res.status, body: json };
+  const type = res.headers.get("content-type") ?? "";
+  const json = type.includes("json") ? await res.json().catch(() => ({})) : {};
+  return { status: res.status, body: json, res };
 }
 
 const fieldsOf = (r) => (r.body.error?.details ?? []).map((d) => d.field).sort();
@@ -54,32 +57,45 @@ function aadhaar() {
 let phoneSeq = 0;
 const phone = () => `98${String(10000000 + (phoneSeq += 1)).slice(-8)}`;
 
-async function otpToken(number) {
-  const sent = await call("POST", "/public/otp/send", { auth: null, body: { phone: number } });
-  assert.equal(sent.status, 201, JSON.stringify(sent.body));
-  const ok = await call("POST", "/public/otp/verify", {
-    auth: null,
-    body: { request_id: sent.body.data.request_id, phone: number, code: sent.body.data.dev_code },
-  });
-  assert.equal(ok.status, 200, JSON.stringify(ok.body));
-  return ok.body.data.otp_token;
-}
+const applicant = (overrides = {}) => ({
+  event_id: eventId, name: "Asha Patil", business_name: "Asha Gruh Udyog", nature_of_business: "food_processing",
+  product_categories: [categoryIds[0]], aadhaar: aadhaar(), caste_category: "open", phone: phone(),
+  consent: true, language: "en",
+  ...overrides,
+});
 
-async function applicant(overrides = {}) {
-  const number = overrides.phone ?? phone();
-  return {
-    event_id: eventId, quota_type: "general", name: "Asha Patil", business_name: "Asha Gruh Udyog",
-    nature_of_business: "Homemade pickles", category_id: categoryId, aadhaar: aadhaar(),
-    udyam_number: "UDYAM-MH-26-0012345", caste_category: "open", phone: number,
-    otp_token: overrides.otp_token ?? (await otpToken(number)), consent: true, language: "en",
-    ...overrides,
-  };
+// A booking as the site sends it: JSON answers in `payload`, files by field key.
+async function book(overrides = {}, files = {}) {
+  const payload = applicant(overrides);
+  const form = new FormData();
+  form.append("payload", JSON.stringify(payload));
+  for (const [key, f] of Object.entries(files)) form.append(key, new Blob([f.data], { type: f.type }), f.name);
+  const r = await call("POST", "/public/registrations", { auth: null, form });
+  return { ...r, payload };
 }
+const certificate = { caste_certificate: { data: PDF, type: "application/pdf", name: "certificate.pdf" } };
+const reserved = (o = {}) => book({ caste_category: "sc", caste_name: "Mahar", ...o }, certificate);
 
-const register = async (o) => call("POST", "/public/registrations", { auth: null, body: await applicant(o) });
 const slots = async (id = eventId) => (await call("GET", `/public/events/${id}/slots`, { auth: null })).body.data;
+const home = async () => (await call("GET", "/public/thet-bajar", { auth: null })).body.data;
 const today = () => new Date().toISOString().slice(0, 10);
 const inDays = (n) => new Date(Date.now() + n * 86400000).toISOString().slice(0, 10);
+
+const eventBody = (o = {}) => ({
+  title_mr: "पुणे बाजार पेठ", title_en: "Pune Bajar Peth", venue_mr: "शिवाजीनगर", venue_en: "Shivajinagar",
+  city_mr: "पुणे", city_en: "Pune", start_date: today(), end_date: inDays(3), event_time: "10:00 AM – 8:00 PM",
+  venue_map_link: "https://maps.google.com/?q=Shivajinagar", contact_phone: "9822012345", total_stalls: 4,
+  quotas: { ews: 1, sponsored: 1 }, ...o,
+});
+
+// A district manager's event, approved by the super admin.
+async function approvedEvent(o = {}, auth = pune) {
+  const r = await call("POST", "/admin/events", { auth, body: eventBody(o) });
+  assert.equal(r.status, 201, JSON.stringify(r.body));
+  const ok = await call("POST", `/admin/events/${r.body.data.id}/review`, { body: { decision: "approved" } });
+  assert.equal(ok.status, 200, JSON.stringify(ok.body));
+  return ok.body.data;
+}
 
 before(async () => {
   const cfg = {
@@ -108,7 +124,7 @@ before(async () => {
 
   admin = (await call("POST", "/auth/login", { auth: null, body: { email: "admin@test.local", password: "Admin@12345" } })).body.data.token;
   districts = (await call("GET", "/admin/districts")).body.data;
-  categoryId = (await pool.query("SELECT id FROM categories WHERE status = 'published' ORDER BY id LIMIT 1")).rows[0].id;
+  categoryIds = (await pool.query("SELECT id FROM categories WHERE status = 'published' ORDER BY id LIMIT 3")).rows.map((r) => r.id);
 });
 
 after(async () => {
@@ -164,50 +180,92 @@ test("RBAC: district managers need a district and get the portal, not the CMS", 
   assert.equal((await call("GET", "/admin/events", { auth: null })).status, 401);
 });
 
-test("events: a manager creates events only in their own district, with stall quotas", async () => {
+test("create event: mandatory fields, stall availability split, own district only", async () => {
   const invalid = await call("POST", "/admin/events", {
-    auth: pune,
-    body: { title_mr: "", venue_mr: "x", start_date: inDays(3), end_date: inDays(1), quotas: { general: -1 } },
+    auth: pune, body: { title_mr: "", venue_mr: "x", start_date: inDays(3), end_date: inDays(1) },
   });
   assert.equal(invalid.status, 422);
-  assert.deepEqual(fieldsOf(invalid), ["end_date", "quotas.general", "title_mr"]);
+  assert.deepEqual(fieldsOf(invalid), ["contact_phone", "event_time", "title_mr", "total_stalls", "venue_map_link"]);
+
+  const dates = await call("POST", "/admin/events", { auth: pune, body: eventBody({ start_date: inDays(3), end_date: inDays(1) }) });
+  assert.deepEqual(fieldsOf(dates), ["end_date"]);
+  const tooMany = await call("POST", "/admin/events", { auth: pune, body: eventBody({ total_stalls: 2, quotas: { ews: 2, sponsored: 1 } }) });
+  assert.deepEqual(fieldsOf(tooMany), ["quotas.ews"]);
+  const badLink = await call("POST", "/admin/events", { auth: pune, body: eventBody({ venue_map_link: "javascript:alert(1)", contact_phone: "12345" }) });
+  assert.deepEqual(fieldsOf(badLink), ["contact_phone", "venue_map_link"]);
 
   const r = await call("POST", "/admin/events", {
-    auth: pune,
-    body: {
-      district_id: district("nashik").id, // ignored for a manager
-      title_mr: "पुणे थेट बाजार पेठ", title_en: "Pune Thet Bajar Peth", venue_mr: "शिवाजीनगर", venue_en: "Shivajinagar",
-      start_date: today(), end_date: inDays(3), status: "published", quotas: { general: 2, ews: 1, sponsored: 1 },
-    },
+    auth: pune, body: eventBody({ district_id: district("nashik").id /* ignored for a manager */, sponsor_name: "Pune Agro Co-op" }),
   });
   assert.equal(r.status, 201, JSON.stringify(r.body));
   eventId = r.body.data.id;
-  assert.equal(r.body.data.district_id, district("pune").id);
-  assert.equal(r.body.data.phase, "live");
-  assert.deepEqual(r.body.data.quotas.general, { total: 2, available: 2 });
+  const e = r.body.data;
+  assert.equal(e.district_id, district("pune").id);
+  assert.equal(e.phase, "live");
+  assert.equal(e.total_stalls, 4);
+  assert.deepEqual(e.quotas, { general: { total: 2, available: 2 }, ews: { total: 1, available: 1 }, sponsored: { total: 1, available: 1 } });
+  assert.equal(e.event_time, "10:00 AM – 8:00 PM");
+  assert.equal(e.contact_phone, "9822012345");
 
   assert.equal((await call("GET", `/admin/events/${eventId}`, { auth: nashik })).status, 404, "other districts cannot see it");
-  assert.equal((await call("PUT", `/admin/events/${eventId}`, { auth: nashik, body: {} })).status, 404);
-  const nashikList = await call("GET", "/admin/events", { auth: nashik });
-  assert.equal(nashikList.body.meta.total, 0);
-  const all = await call("GET", `/admin/events?district=${district("pune").id}`);
-  assert.equal(all.body.meta.total, 1, "super admin sees every district");
-
-  // Super admins must say which district.
-  const noDistrict = await call("POST", "/admin/events", {
-    body: { title_mr: "x", venue_mr: "y", start_date: today(), end_date: today() },
-  });
-  assert.deepEqual(fieldsOf(noDistrict), ["district_id"]);
+  assert.equal((await call("PUT", `/admin/events/${eventId}`, { auth: nashik, body: eventBody() })).status, 404);
+  assert.equal((await call("GET", "/admin/events", { auth: nashik })).body.meta.total, 0);
+  const noDistrict = await call("POST", "/admin/events", { body: eventBody() });
+  assert.deepEqual(fieldsOf(noDistrict), ["district_id"], "super admins must say which district");
 });
 
-test("public home data: counts, live events with availability, districts and the slot counter", async () => {
-  const r = await call("GET", "/public/thet-bajar", { auth: null });
-  assert.equal(r.status, 200);
-  assert.equal(r.body.data.stats.total_events, 1);
-  assert.equal(r.body.data.stats.live_events, 1);
-  assert.equal(r.body.data.events[0].id, eventId);
-  assert.equal(r.body.data.events[0].bookable, true);
-  assert.deepEqual(district("pune") && r.body.data.districts.find((d) => d.code === "pune").event_ids, [eventId]);
+test("approval: a manager's event is public and bookable only after a super admin approves it", async () => {
+  const created = (await call("GET", `/admin/events/${eventId}`, { auth: pune })).body.data;
+  assert.equal(created.approval_status, "pending");
+  assert.equal((await home()).events.length, 0, "pending events are not on the site");
+  assert.equal((await call("GET", `/public/events/${eventId}`, { auth: null })).status, 404);
+  assert.deepEqual(fieldsOf(await book()), ["event_id"], "pending events cannot be booked");
+  assert.ok(!(await home()).sponsors.some((s) => s.name === "Pune Agro Co-op"), "nor is their sponsor shown");
+
+  const queue = await call("GET", "/admin/events?approval=pending&sort=submitted_at");
+  assert.deepEqual(queue.body.data.map((e) => e.id), [eventId]);
+  assert.equal((await call("POST", `/admin/events/${eventId}/review`, { auth: pune, body: { decision: "approved" } })).status, 403);
+  assert.deepEqual(fieldsOf(await call("POST", `/admin/events/${eventId}/review`, { body: { decision: "rejected" } })), ["note"]);
+
+  const rejected = await call("POST", `/admin/events/${eventId}/review`, { body: { decision: "rejected", note: "Add the venue map" } });
+  assert.equal(rejected.body.data.approval_status, "rejected");
+  assert.equal((await home()).events.length, 0);
+
+  // Editing sends it back to the queue.
+  const resubmitted = await call("PUT", `/admin/events/${eventId}`, { auth: pune, body: { ...eventBody(), sponsor_name: "Pune Agro Co-op" } });
+  assert.equal(resubmitted.body.data.approval_status, "pending");
+  assert.equal(resubmitted.body.data.review_note, "");
+
+  const approved = await call("POST", `/admin/events/${eventId}/review`, { body: { decision: "approved" } });
+  assert.equal(approved.body.data.approval_status, "approved");
+  assert.equal(approved.body.data.reviewed_by_name, "Super Admin");
+  const data = await home();
+  assert.deepEqual(data.events.map((e) => e.id), [eventId]);
+  assert.equal(data.events[0].city_en, "Pune");
+  assert.ok(data.sponsors.some((s) => s.name === "Pune Agro Co-op" && s.id === `event-${eventId}`), "an approved event's sponsor is shown");
+
+  const log = await call("GET", "/admin/activity?action=status");
+  assert.ok(log.body.data.some((a) => a.summary.startsWith("Approved event")), "approvals are audited");
+
+  // A super admin's own event needs no approval.
+  const own = await call("POST", "/admin/events", { body: eventBody({ district_id: district("nashik").id, start_date: inDays(10), end_date: inDays(11) }) });
+  assert.equal(own.body.data.approval_status, "approved");
+  await call("DELETE", `/admin/events/${own.body.data.id}`);
+});
+
+test("public home data: statistics, highlights, district event counts and the slot counter", async () => {
+  const past = await approvedEvent({ title_en: "Pune Diwali Bajar", start_date: inDays(-20), end_date: inDays(-18) });
+  const data = await home();
+  assert.equal(data.stats.total_events, 1, "only completed events count");
+  assert.equal(data.stats.live_events, 1);
+  assert.equal(data.stats.total_participants, 0);
+  assert.ok(data.stats.total_visitors >= 1000000, "visitors start at a base of one million");
+  assert.deepEqual(data.highlights.map((e) => e.id), [eventId, past.id], "latest two events, newest first");
+  assert.deepEqual(data.events.map((e) => e.id), [eventId], "completed events are not bookable cards");
+  const p = data.districts.find((d) => d.code === "pune");
+  assert.equal(p.event_count, 2, "the map counts every event organised in the district");
+  assert.deepEqual(p.event_ids, [eventId]);
+  assert.equal(data.districts.find((d) => d.code === "akola").event_count, 0);
 
   const s = await slots();
   assert.deepEqual(s.quotas, { general: { total: 2, available: 2 }, ews: { total: 1, available: 1 } });
@@ -215,96 +273,87 @@ test("public home data: counts, live events with availability, districts and the
   assert.equal(s.state, "open");
 });
 
-test("OTP: wrong code refused, attempts limited, token single-use", async () => {
-  const number = phone();
-  const sent = await call("POST", "/public/otp/send", { auth: null, body: { phone: number } });
-  assert.match(sent.body.data.dev_code, /^\d{6}$/);
-  assert.equal((await call("POST", "/public/otp/send", { auth: null, body: { phone: number } })).status, 429, "resend throttled");
-  const wrong = await call("POST", "/public/otp/verify", {
-    auth: null, body: { request_id: sent.body.data.request_id, phone: number, code: sent.body.data.dev_code === "000000" ? "111111" : "000000" },
-  });
-  assert.equal(wrong.status, 422);
-  assert.equal(wrong.body.error.details[0].message, "Incorrect code");
-  const otherPhone = await call("POST", "/public/otp/verify", {
-    auth: null, body: { request_id: sent.body.data.request_id, phone: phone(), code: sent.body.data.dev_code },
-  });
-  assert.equal(otherPhone.status, 422, "code is bound to its number");
-  const { rows } = await pool.query("SELECT code_hash FROM otp_verifications WHERE id = $1", [sent.body.data.request_id]);
-  assert.notEqual(rows[0].code_hash, sent.body.data.dev_code, "only a hash is stored");
-
-  const noOtp = await register({ otp_token: "00000000-0000-4000-8000-000000000000" });
-  assert.equal(noOtp.status, 422);
-  assert.deepEqual(fieldsOf(noOtp), ["phone"]);
+test("visitor counter counts up from its base", async () => {
+  const before = (await home()).stats.total_visitors;
+  const r = await call("POST", "/public/visits", { auth: null });
+  assert.equal(r.status, 200);
+  assert.equal(r.body.data.total_visitors, before + 1);
+  assert.equal((await home()).stats.total_visitors, before + 1);
 });
 
-test("registration validation: Aadhaar, Udyam, EWS eligibility, category, closed events", async () => {
-  const bad = await register({ aadhaar: "234567890123", udyam_number: "UDYAM-12" });
-  assert.equal(bad.status, 422);
-  assert.deepEqual(fieldsOf(bad), ["aadhaar", "udyam_number"]);
-  assert.deepEqual(fieldsOf(await register({ quota_type: "ews", caste_category: "open" })), ["quota_type"]);
-  assert.deepEqual(fieldsOf(await register({ category_id: 999999 })), ["category_id"]);
+test("booking validation: mandatory fields, numeric Aadhaar, categories, reserved-category documents", async () => {
+  const empty = await call("POST", "/public/registrations", { auth: null, body: { event_id: eventId } });
+  assert.equal(empty.status, 422);
+  assert.deepEqual(fieldsOf(empty), ["aadhaar", "business_name", "caste_category", "consent", "name", "nature_of_business", "phone", "product_categories"]);
 
-  const draft = await call("POST", "/admin/events", {
-    auth: pune, body: { title_mr: "मसुदा", venue_mr: "x", start_date: today(), end_date: today(), quotas: { general: 5 } },
-  });
-  assert.deepEqual(fieldsOf(await register({ event_id: draft.body.data.id })), ["event_id"], "drafts are not bookable");
+  assert.deepEqual(fieldsOf(await book({ aadhaar: "2345 6789 01AB" })), ["aadhaar"], "digits only");
+  assert.deepEqual(fieldsOf(await book({ aadhaar: "234567890123" })), ["aadhaar"], "checksum");
+  assert.deepEqual(fieldsOf(await book({ product_categories: [] })), ["product_categories"]);
+  assert.deepEqual(fieldsOf(await book({ product_categories: [999999] })), ["product_categories"]);
+  assert.deepEqual(fieldsOf(await book({ nature_of_business: "smuggling" })), ["nature_of_business"]);
+
+  // EWS / reserved categories need the caste name and a caste certificate.
+  assert.deepEqual(fieldsOf(await book({ caste_category: "sc" })), ["caste_certificate", "caste_name"]);
+  assert.deepEqual(fieldsOf(await book({ caste_category: "sc", caste_name: "Mahar" })), ["caste_certificate"]);
+  const fake = await book({ caste_category: "sc", caste_name: "Mahar" },
+    { caste_certificate: { data: Buffer.from("MZ not a pdf"), type: "application/pdf", name: "x.pdf" } });
+  assert.deepEqual(fieldsOf(fake), ["caste_certificate"], "content must match the declared type");
+  const exe = await book({ caste_category: "sc", caste_name: "Mahar" },
+    { caste_certificate: { data: Buffer.from("MZ"), type: "application/x-msdownload", name: "x.exe" } });
+  assert.equal(exe.status, 422);
+  assert.equal(readdirSync(BOOKING_DIR).length, 0, "refused bookings leave no files behind");
+  assert.equal((await slots()).available, 3, "refused bookings take no stall");
 });
 
-test("slots decrement on every booking; a full quota waitlists; duplicates and OTP reuse refused", async () => {
-  const first = await applicant();
-  const r1 = await call("POST", "/public/registrations", { auth: null, body: first });
+test("slots: every booking decrements; reserved categories take EWS stalls first; full quotas waitlist", async () => {
+  const r1 = await book({ product_categories: [categoryIds[0], categoryIds[1], categoryIds[1]] });
   assert.equal(r1.status, 201, JSON.stringify(r1.body));
   assert.equal(r1.body.data.status, "pending");
-  assert.equal(r1.body.data.available, 1);
+  assert.equal(r1.body.data.available, 2);
   assert.match(r1.body.data.reference_no, /^TBP-\d{4}-[0-9A-F]{6}$/);
-  assert.equal((await slots()).quotas.general.available, 1);
+  const { rows: [stored] } = await pool.query(
+    "SELECT quota_type, category_ids, category_label, nature_of_business, aadhaar_cipher, aadhaar_last4 FROM vendor_registrations WHERE reference_no = $1",
+    [r1.body.data.reference_no]
+  );
+  assert.equal(stored.quota_type, "general");
+  assert.deepEqual(stored.category_ids, [categoryIds[0], categoryIds[1]]);
+  assert.match(stored.category_label, /, /);
+  assert.equal(stored.nature_of_business, "Food processing");
+  assert.ok(!stored.aadhaar_cipher.includes(r1.payload.aadhaar), "Aadhaar stored encrypted");
+  assert.equal(stored.aadhaar_last4, r1.payload.aadhaar.slice(-4));
 
-  const reuse = await call("POST", "/public/registrations", { auth: null, body: { ...first, aadhaar: aadhaar() } });
-  assert.deepEqual(fieldsOf(reuse), ["phone"], "an OTP token books once");
-
-  const dup = await register({ aadhaar: first.aadhaar });
+  const dup = await book({ aadhaar: r1.payload.aadhaar });
   assert.equal(dup.status, 409);
   assert.deepEqual(fieldsOf(dup), ["aadhaar"]);
-  assert.equal((await slots()).quotas.general.available, 1, "a refused booking does not consume a slot");
 
-  const r2 = await register();
-  assert.equal(r2.body.data.status, "pending");
-  assert.equal(r2.body.data.available, 0);
+  const ews = await reserved();
+  assert.equal(ews.status, 201, JSON.stringify(ews.body));
+  assert.equal(readdirSync(BOOKING_DIR).length, 1, "the certificate is stored privately");
+  assert.equal((await slots()).quotas.ews.available, 0, "a reserved applicant takes the EWS stall");
 
-  const r3 = await register();
-  assert.equal(r3.body.data.status, "waitlisted");
+  const ews2 = await reserved();
+  assert.equal(ews2.body.data.status, "pending");
   const s = await slots();
-  assert.equal(s.quotas.general.available, 0);
-  assert.equal(s.available, 1, "EWS stall still free");
-  assert.equal(s.state, "open");
+  assert.deepEqual([s.quotas.general.available, s.quotas.ews.available], [0, 0], "with EWS full, a general stall");
+  assert.equal(s.state, "waitlist");
 
-  const ews = await register({ quota_type: "ews", caste_category: "sc" });
-  assert.equal(ews.body.data.status, "pending");
-  const full = await slots();
-  assert.equal(full.available, 0);
-  assert.equal(full.state, "waitlist");
-
-  const { rows } = await pool.query("SELECT aadhaar_cipher, aadhaar_last4 FROM vendor_registrations WHERE reference_no = $1", [r1.body.data.reference_no]);
-  assert.ok(!rows[0].aadhaar_cipher.includes(first.aadhaar), "Aadhaar stored encrypted");
-  assert.equal(rows[0].aadhaar_last4, first.aadhaar.slice(-4));
+  const late = await book();
+  assert.equal(late.body.data.status, "waitlisted");
+  assert.equal(late.body.data.available, 0);
 });
 
 test("concurrent bookings never oversell the last slot", async () => {
-  const e = await call("POST", "/admin/events", {
-    auth: pune,
-    body: { title_mr: "गर्दी", venue_mr: "x", start_date: inDays(5), end_date: inDays(6), status: "published", quotas: { general: 1 } },
-  });
-  const bodies = await Promise.all(Array.from({ length: 6 }, () => applicant({ event_id: e.body.data.id })));
-  const results = await Promise.all(bodies.map((b) => call("POST", "/public/registrations", { auth: null, body: b })));
+  const e = await approvedEvent({ title_en: "Crowd", start_date: inDays(5), end_date: inDays(6), total_stalls: 1, quotas: {} });
+  const results = await Promise.all(Array.from({ length: 6 }, () => book({ event_id: e.id })));
   const statuses = results.map((r) => r.body.data?.status).sort();
   assert.deepEqual(statuses, ["pending", "waitlisted", "waitlisted", "waitlisted", "waitlisted", "waitlisted"]);
-  const s = await slots(e.body.data.id);
+  const s = await slots(e.id);
   assert.equal(s.quotas.general.available, 0);
   assert.equal(s.state, "waitlist");
   assert.equal(s.bookable, true, "upcoming events are bookable");
 });
 
-test("CRM: masked Aadhaar, scoped access, rejection promotes the waitlist, quotas guard allocations", async () => {
+test("CRM: masked Aadhaar, documents, scoped access, rejection promotes the waitlist, quotas guard allocations", async () => {
   const list = await call("GET", `/admin/registrations?event=${eventId}&quota=general&sort=created_at&order=asc`, { auth: pune });
   assert.equal(list.status, 200);
   const [a, b, c] = list.body.data;
@@ -312,45 +361,50 @@ test("CRM: masked Aadhaar, scoped access, rejection promotes the waitlist, quota
   assert.match(a.aadhaar_masked, /^XXXX XXXX \d{4}$/);
   assert.equal(a.aadhaar_cipher, undefined);
   assert.equal(a.aadhaar_hash, undefined);
+  assert.equal(b.caste_name, "Mahar");
+  assert.deepEqual(Object.keys(b.files), ["caste_certificate"]);
+  assert.equal(b.files.caste_certificate.filename, undefined, "the stored filename stays private");
+
+  // Documents: own district only, audited.
+  const doc = await call("GET", `/admin/registrations/${b.id}/files/caste_certificate`, { auth: pune });
+  assert.equal(doc.status, 200);
+  assert.equal(doc.res.headers.get("content-type"), "application/pdf");
+  assert.match(doc.res.headers.get("content-disposition"), /certificate\.pdf/);
+  assert.equal(Buffer.from(await doc.res.arrayBuffer()).subarray(0, 5).toString(), "%PDF-");
+  assert.equal((await call("GET", `/admin/registrations/${b.id}/files/caste_certificate`, { auth: nashik })).status, 404);
+  assert.equal((await call("GET", `/admin/registrations/${a.id}/files/caste_certificate`, { auth: pune })).status, 404);
+  assert.equal((await call("GET", `/admin/registrations/${b.id}/files/caste_certificate`, { auth: null })).status, 401);
+  assert.equal((await call("GET", "/admin/activity?action=download")).body.data.length, 1);
 
   assert.equal((await call("GET", `/admin/registrations/${a.id}`, { auth: nashik })).status, 404);
   assert.equal((await call("PATCH", `/admin/registrations/${a.id}`, { auth: nashik, body: { status: "approved" } })).status, 404);
-  assert.equal((await call("GET", "/admin/registrations", { auth: nashik })).body.meta.total, 0);
 
-  const detail = await call("GET", `/admin/registrations/${c.id}`, { auth: pune });
-  assert.equal(detail.body.data.waitlist_position, 1);
+  assert.equal((await call("GET", `/admin/registrations/${c.id}`, { auth: pune })).body.data.waitlist_position, 1);
+  assert.equal((await call("PATCH", `/admin/registrations/${c.id}`, { auth: pune, body: { status: "approved" } })).status, 409, "needs a free slot");
 
-  // Waitlisted → approved needs a free slot.
-  const noSlot = await call("PATCH", `/admin/registrations/${c.id}`, { auth: pune, body: { status: "approved" } });
-  assert.equal(noSlot.status, 409);
-
-  const approved = await call("PATCH", `/admin/registrations/${a.id}`, { auth: pune, body: { status: "approved", udyam_verified: true, dm_notes: "Docs checked" } });
+  const approved = await call("PATCH", `/admin/registrations/${a.id}`, { auth: pune, body: { status: "approved", dm_notes: "Docs checked" } });
   assert.equal(approved.body.data.status, "approved");
-  assert.equal(approved.body.data.udyam_verified, true);
+  assert.equal((await home()).stats.total_participants, 1, "approved vendors are participants");
 
   const rejected = await call("PATCH", `/admin/registrations/${b.id}`, { auth: pune, body: { status: "rejected" } });
   assert.deepEqual(rejected.body.data.promoted_ids, [c.id], "oldest waitlisted takes the freed slot");
   assert.equal((await call("GET", `/admin/registrations/${c.id}`, { auth: pune })).body.data.status, "pending");
-  assert.equal((await slots()).quotas.general.available, 0);
 
-  // Quotas: cannot shrink below allocations; growing frees slots.
-  const event = (await call("GET", `/admin/events/${eventId}`, { auth: pune })).body.data;
-  const put = (quotas) => call("PUT", `/admin/events/${eventId}`, { auth: pune, body: { ...event, quotas } });
-  const shrink = await put({ general: 1, ews: 1, sponsored: 1 });
+  // Stall availability cannot shrink below allocations; growing frees slots.
+  const put = (total_stalls) =>
+    call("PUT", `/admin/events/${eventId}`, { auth: pune, body: eventBody({ total_stalls, quotas: { ews: 1, sponsored: 1 } }) });
+  const shrink = await put(3);
   assert.equal(shrink.status, 422);
   assert.deepEqual(fieldsOf(shrink), ["quotas.general"]);
-  const grow = await put({ general: 4, ews: 1, sponsored: 1 });
+  const grow = await put(6);
   assert.equal(grow.status, 200);
   assert.deepEqual(grow.body.data.quotas.general, { total: 4, available: 2 });
-
-  // Releasing via cancel frees a slot again.
-  await call("PATCH", `/admin/registrations/${c.id}`, { auth: pune, body: { status: "cancelled" } });
-  assert.equal((await slots()).quotas.general.available, 3);
+  await call("POST", `/admin/events/${eventId}/review`, { body: { decision: "approved" } });
 });
 
-test("managers allocate sponsored stalls without OTP; super admins can reveal Aadhaar (audited)", async () => {
-  const body = await applicant({ quota_type: "sponsored", otp_token: undefined });
-  delete body.otp_token;
+test("managers allocate sponsored stalls; super admins can reveal Aadhaar (audited)", async () => {
+  const body = applicant({ quota_type: "sponsored" });
+  delete body.consent;
   const r = await call("POST", "/admin/registrations", { auth: pune, body });
   assert.equal(r.status, 201, JSON.stringify(r.body));
   assert.equal(r.body.data.status, "pending");
@@ -361,63 +415,118 @@ test("managers allocate sponsored stalls without OTP; super admins can reveal Aa
   assert.equal((await call("POST", `/admin/registrations/${r.body.data.id}/reveal-aadhaar`, { auth: pune })).status, 403);
   const reveal = await call("POST", `/admin/registrations/${r.body.data.id}/reveal-aadhaar`);
   assert.equal(reveal.body.data.aadhaar, body.aadhaar);
-  const log = await call("GET", "/admin/activity?action=reveal");
-  assert.equal(log.body.data.length, 1);
+  assert.equal((await call("GET", "/admin/activity?action=reveal")).body.data.length, 1);
 });
 
 test("sponsors: manager drafts and requests approval; only a super admin approves; edits need re-approval", async () => {
-  const publicNames = async () => (await call("GET", "/public/thet-bajar", { auth: null })).body.data.sponsors.map((s) => s.name);
+  const publicNames = async () => (await home()).sponsors.map((s) => s.name);
   const created = await call("POST", "/admin/sponsors", {
-    auth: pune, body: { name: "Pune Agro Co-op", tier: "gold", website: "https://example.org", event_id: eventId },
+    auth: pune, body: { name: "Pune Bank", tier: "gold", website: "https://example.org", event_id: eventId },
   });
   assert.equal(created.status, 201);
   const id = created.body.data.id;
   assert.equal(created.body.data.status, "draft");
-  assert.equal(created.body.data.district_id, district("pune").id);
-  assert.ok(!(await publicNames()).includes("Pune Agro Co-op"));
+  assert.ok(!(await publicNames()).includes("Pune Bank"));
 
   const foreign = await call("POST", "/admin/sponsors", { auth: nashik, body: { name: "X", event_id: eventId } });
   assert.deepEqual(fieldsOf(foreign), ["event_id"], "cannot attach another district's event");
 
-  const req = await call("POST", `/admin/sponsors/${id}/request-approval`, { auth: pune });
-  assert.equal(req.body.data.status, "pending");
-  assert.equal((await call("POST", `/admin/sponsors/${id}/request-approval`, { auth: pune })).status, 409);
+  assert.equal((await call("POST", `/admin/sponsors/${id}/request-approval`, { auth: pune })).body.data.status, "pending");
   assert.equal((await call("PUT", `/admin/sponsors/${id}`, { auth: pune, body: { name: "Changed" } })).status, 409, "locked while in review");
   assert.equal((await call("POST", `/admin/sponsors/${id}/review`, { auth: pune, body: { decision: "approved" } })).status, 403);
-
-  const queue = await call("GET", "/admin/sponsors?status=pending");
-  assert.deepEqual(queue.body.data.map((s) => s.id), [id]);
-  assert.deepEqual(fieldsOf(await call("POST", `/admin/sponsors/${id}/review`, { body: { decision: "rejected" } })), ["note"]);
-  const approved = await call("POST", `/admin/sponsors/${id}/review`, { body: { decision: "approved" } });
-  assert.equal(approved.body.data.status, "approved");
-  assert.ok((await publicNames()).includes("Pune Agro Co-op"));
+  assert.deepEqual((await call("GET", "/admin/sponsors?status=pending")).body.data.map((s) => s.id), [id]);
+  assert.equal((await call("POST", `/admin/sponsors/${id}/review`, { body: { decision: "approved" } })).body.data.status, "approved");
+  assert.ok((await publicNames()).includes("Pune Bank"));
 
   const edited = await call("PUT", `/admin/sponsors/${id}`, {
-    auth: pune, body: { name: "Pune Agro Co-op Ltd", tier: "gold", website: "https://example.org", event_id: eventId },
+    auth: pune, body: { name: "Pune Bank Ltd", tier: "gold", website: "https://example.org", event_id: eventId },
   });
   assert.equal(edited.body.data.status, "draft");
-  assert.ok(!(await publicNames()).some((n) => n.startsWith("Pune Agro")), "unapproved edits are not public");
+  assert.ok(!(await publicNames()).some((n) => n.startsWith("Pune Bank")), "unapproved edits are not public");
 });
 
-test("form builder: custom fields are rendered publicly and enforced on submission", async () => {
-  const save = await call("PUT", "/admin/forms/vendor_registration", {
-    body: {
-      title: "Stall registration form",
-      fields: [{ key: "stall_size", label_mr: "स्टॉल आकार", label_en: "Stall size", type: "select", required: true,
-        options: [{ value: "small", label_mr: "लहान", label_en: "Small" }, { value: "large", label_mr: "मोठा", label_en: "Large" }] }],
-    },
-  });
-  assert.equal(save.status, 200, JSON.stringify(save.body));
-  const pub = await call("GET", "/public/forms/vendor_registration", { auth: null });
-  assert.equal(pub.body.data.fields[0].key, "stall_size");
+test("form builder: system fields are kept and locked; optional ones can be switched", async () => {
+  const form = (await call("GET", "/admin/forms/vendor_registration")).body.data;
+  const keys = form.fields.map((f) => f.key);
+  assert.deepEqual(keys.slice(0, 9), [
+    "name", "business_name", "nature_of_business", "product_categories", "aadhaar", "caste_category", "caste_name", "caste_certificate", "phone",
+  ]);
+  assert.ok(form.fields.find((f) => f.key === "name").locked);
+  assert.equal(form.fields.find((f) => f.key === "nature_of_business").options.length, 9);
 
-  const missing = await register();
-  assert.deepEqual(fieldsOf(missing), ["extra.stall_size"]);
-  const ok = await register({ extra: { stall_size: "large", ignored: "x" } });
-  assert.equal(ok.status, 201);
-  const { rows } = await pool.query("SELECT extra FROM vendor_registrations WHERE reference_no = $1", [ok.body.data.reference_no]);
-  assert.deepEqual(rows[0].extra, { stall_size: "large" });
-  await call("PUT", "/admin/forms/vendor_registration", { body: { title: "Stall registration form", fields: [] } });
+  // Dropping locked fields or making them optional is undone; phone becomes optional.
+  const fields = form.fields
+    .filter((f) => f.key !== "aadhaar")
+    .map((f) => (f.key === "name" ? { ...f, required: false, type: "textarea" } : f.key === "phone" ? { ...f, required: false } : f));
+  const saved = await call("PUT", "/admin/forms/vendor_registration", { body: { title: form.title, fields } });
+  assert.equal(saved.status, 200, JSON.stringify(saved.body));
+  const after = Object.fromEntries(saved.body.data.fields.map((f) => [f.key, f]));
+  assert.ok(after.aadhaar && after.aadhaar.required, "locked fields cannot be removed");
+  assert.deepEqual([after.name.required, after.name.type], [true, "text"]);
+  assert.equal(after.phone.required, false);
+  const noPhone = await book({ phone: "" });
+  assert.equal(noPhone.status, 201, JSON.stringify(noPhone.body));
+
+  const reservedKey = await call("PUT", "/admin/forms/vendor_registration", {
+    body: { title: form.title, fields: [...form.fields, { key: "event_id", label_mr: "x", type: "text" }] },
+  });
+  assert.deepEqual(fieldsOf(reservedKey), [`fields.${form.fields.length}.key`]);
+  const noOptions = await call("PUT", "/admin/forms/vendor_registration", {
+    body: { title: form.title, fields: [...form.fields, { key: "size", label_mr: "x", type: "radio" }] },
+  });
+  assert.deepEqual(fieldsOf(noOptions), [`fields.${form.fields.length}.options`]);
+});
+
+test("form builder: every field type is validated and stored safely", async () => {
+  const form = (await call("GET", "/admin/forms/vendor_registration")).body.data;
+  const opts = [{ value: "a", label_mr: "अ", label_en: "A" }, { value: "b", label_mr: "ब", label_en: "B" }];
+  const q = (key, type, extra = {}) => ({ key, label_mr: key, label_en: key, type, required: true, ...extra });
+  const custom = [
+    q("q_text", "text"), q("q_email", "email"), q("q_phone", "phone"), q("q_number", "number"), q("q_pan", "pan"),
+    q("q_date", "date"), q("q_area", "textarea"), q("q_select", "select", { options: opts }), q("q_radio", "radio", { options: opts }),
+    q("q_checks", "checkbox", { options: opts }), q("q_tick", "checkbox"), q("q_file", "file"), q("q_password", "password"), q("q_url", "url"),
+    q("q_optional", "email", { required: false }),
+  ];
+  const saved = await call("PUT", "/admin/forms/vendor_registration", { body: { title: form.title, fields: [...form.fields, ...custom] } });
+  assert.equal(saved.status, 200, JSON.stringify(saved.body));
+  const pub = await call("GET", "/public/forms/vendor_registration", { auth: null });
+  assert.deepEqual(pub.body.data.fields.slice(-15).map((f) => f.type), custom.map((f) => f.type));
+
+  const missing = await book();
+  assert.deepEqual(fieldsOf(missing), custom.filter((f) => f.required).map((f) => `extra.${f.key}`).sort());
+  assert.equal(missing.body.error.details.find((d) => d.field === "extra.q_file").message, "Upload the q_file");
+
+  const bad = await book({
+    extra: {
+      q_text: "x", q_email: "nope", q_phone: "123", q_number: "abc", q_pan: "ABC123", q_date: "31-12-2026", q_area: "x",
+      q_select: "z", q_radio: "z", q_checks: ["a", "z"], q_tick: false, q_password: "short", q_url: "ftp://x", q_optional: "bad",
+    },
+  }, { q_file: { data: PNG_1PX, type: "image/png", name: "photo.png" } });
+  assert.deepEqual(fieldsOf(bad), [
+    "extra.q_checks", "extra.q_date", "extra.q_email", "extra.q_number", "extra.q_optional", "extra.q_pan", "extra.q_password",
+    "extra.q_phone", "extra.q_radio", "extra.q_select", "extra.q_tick", "extra.q_url",
+  ]);
+
+  const good = await book({
+    extra: {
+      q_text: "Hello", q_email: "Asha@Example.org", q_phone: "98765 43210", q_number: "12", q_pan: "abcde1234f", q_date: "2026-12-31",
+      q_area: "Long answer", q_select: "a", q_radio: "b", q_checks: ["a", "b", "a"], q_tick: true, q_password: "Secret123", q_url: "https://example.org",
+      q_optional: "", unknown: "dropped",
+    },
+  }, { q_file: { data: PNG_1PX, type: "image/png", name: "photo.png" } });
+  assert.equal(good.status, 201, JSON.stringify(good.body));
+  const { rows: [row] } = await pool.query("SELECT id, extra, files FROM vendor_registrations WHERE reference_no = $1", [good.body.data.reference_no]);
+  assert.deepEqual({ ...row.extra, q_password: "hash" }, {
+    q_text: "Hello", q_email: "asha@example.org", q_phone: "9876543210", q_number: 12, q_pan: "ABCDE1234F", q_date: "2026-12-31",
+    q_area: "Long answer", q_select: "a", q_radio: "b", q_checks: ["a", "b"], q_tick: true, q_password: "hash", q_url: "https://example.org", q_optional: "",
+  });
+  assert.match(row.extra.q_password, /^\$2[aby]\$/, "passwords are stored hashed");
+  assert.equal(row.files.q_file.mime_type, "image/png");
+  assert.ok(existsSync(path.join(BOOKING_DIR, row.files.q_file.filename)));
+  const shown = (await call("GET", `/admin/registrations/${row.id}`)).body.data;
+  assert.equal(shown.extra.q_password, "••••••••");
+
+  await call("PUT", "/admin/forms/vendor_registration", { body: { title: form.title, fields: form.fields } });
 });
 
 test("media CMS: managers upload gallery photos to their own events only", async () => {

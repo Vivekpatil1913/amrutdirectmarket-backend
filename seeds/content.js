@@ -32,8 +32,6 @@ export const SEED_SECTIONS = {
     notice_text_en: "Preview: the enquiry form on this website does not send any data.",
     notice_short_mr: "पूर्वावलोकन",
     notice_short_en: "Preview",
-    header_cta_mr: "नोंदणी करा",
-    header_cta_en: "Register",
     site_title_mr: "अमृत पेठ थेट बाजार पेठ | महाराष्ट्र शासन",
     site_title_en: "AMRUT Peth Direct Market | Government of Maharashtra",
     meta_description_mr: "अमृत पेठ थेट बाजार पेठ. स्थानिक उद्योजक, कारागीर आणि शेतकऱ्यांना थेट ग्राहकांशी जोडणारा महाराष्ट्र शासनाचा बाजार.",
@@ -182,10 +180,10 @@ export const SEED_SECTIONS = {
 export const SEED_COLLECTIONS = {
   nav_items: [
     { label_mr: "मुख्य पृष्ठ", label_en: "Home", section: "home" },
-    { label_mr: "अमृत पेठ थेट बाजार पेठ", label_en: "AMRUT Peth Direct Market", section: "about" },
     { label_mr: "वैशिष्ट्ये", label_en: "Highlights", section: "highlights" },
+    { label_mr: "आगामी प्रदर्शने", label_en: "Upcoming events", section: "events" },
     { label_mr: "सहभाग", label_en: "Participate", section: "participate" },
-    { label_mr: "संपर्क", label_en: "Contact", section: "register" },
+    { label_mr: "जिल्हे", label_en: "Districts", section: "map" },
   ],
   hero_facts: [
     { label_mr: "आयोजक", label_en: "Organised by", value_mr: "अमृत", value_en: "AMRUT" },
@@ -194,10 +192,10 @@ export const SEED_COLLECTIONS = {
     { label_mr: "मध्यस्थ", label_en: "Middlemen", value_mr: "नाही", value_en: "None" },
   ],
   quick_links: [
-    { title_mr: "अमृत पेठ थेट बाजार पेठ", title_en: "AMRUT Peth Direct Market", desc_mr: "अमृत पेठ थेट बाजार पेठ म्हणजे काय", desc_en: "What AMRUT Peth Direct Market is", icon: "info", section: "about" },
+    { title_mr: "अमृत पेठ थेट बाजार पेठ", title_en: "AMRUT Peth Direct Market", desc_mr: "अमृत पेठ थेट बाजार पेठ म्हणजे काय", desc_en: "What AMRUT Peth Direct Market is", icon: "info", section: "events" },
     { title_mr: "वैशिष्ट्ये", title_en: "Highlights", desc_mr: "उद्योजकांसाठी फायदे", desc_en: "Benefits for local businesses", icon: "sparkle", section: "highlights" },
     { title_mr: "सहभाग", title_en: "Participate", desc_mr: "स्टॉल घेण्याची सोपी प्रक्रिया", desc_en: "How to take a stall", icon: "store", section: "participate" },
-    { title_mr: "संपर्क", title_en: "Contact", desc_mr: "चौकशी व संपर्क", desc_en: "Enquiries and contact", icon: "phone", section: "register" },
+    { title_mr: "संपर्क", title_en: "Contact", desc_mr: "चौकशी व संपर्क", desc_en: "Enquiries and contact", icon: "phone", section: "map" },
   ],
   categories: [
     { name_mr: "अन्न व कृषी", name_en: "Food & Agriculture", slug: "food-and-agriculture" },
@@ -224,7 +222,7 @@ export const SEED_COLLECTIONS = {
     { name_mr: "स्वयं-सहायता गट", name_en: "Self-help groups" },
   ],
   participation_steps: [
-    { title_mr: "आपली इच्छा नोंदवा", title_en: "Register your interest", desc_mr: "चौकशी अर्जाद्वारे आपले संपर्क तपशील आणि उत्पादनांची माहिती द्या.", desc_en: "Share your contact details and what you make using the enquiry form.", icon: "send" },
+    { title_mr: "स्टॉल बुक करा", title_en: "Book a stall", desc_mr: "आगामी प्रदर्शनावरील “स्टॉल बुक करा” वापरून आपली व व्यवसायाची माहिती द्या.", desc_en: "Use “Book a Stall” on an upcoming event and give your and your business’s details.", icon: "send" },
     { title_mr: "अमृतकडून निश्चिती", title_en: "Confirm with AMRUT", desc_mr: "अधिकृत स्टॉल बुकिंग आपल्या अमृत जिल्हा कार्यालयामार्फत निश्चित केले जाते.", desc_en: "Official stall bookings are confirmed through your AMRUT district office.", icon: "building" },
     { title_mr: "स्टॉल लावा व विक्री करा", title_en: "Set up and sell", desc_mr: "प्रदर्शनात आपली उत्पादने मांडा आणि थेट ग्राहकांना विका.", desc_en: "Display your products at the exhibition and sell directly to customers.", icon: "store" },
   ],

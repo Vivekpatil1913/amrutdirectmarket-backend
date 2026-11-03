@@ -76,8 +76,3 @@ export function hashAadhaar(value) {
   return crypto.createHmac("sha256", keyBytes()).update(normalizeAadhaar(value)).digest("hex");
 }
 
-export function hashOtp(id, code) {
-  return crypto.createHmac("sha256", keyBytes()).update(`${id}:${code}`).digest("hex");
-}
-
-export const newOtpCode = () => String(crypto.randomInt(0, 1000000)).padStart(6, "0");

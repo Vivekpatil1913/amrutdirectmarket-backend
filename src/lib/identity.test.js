@@ -4,8 +4,8 @@ import {
   decryptAadhaar, encryptAadhaar, hashAadhaar, isValidAadhaar, maskAadhaar, normalizeUdyam, UDYAM_RE, verhoeffValid,
 } from "./identity.js";
 import { slotTransition } from "../modules/registrations/slots.js";
-import { managerRegistrationSchema, publicRegistrationSchema } from "../modules/registrations/registrations.schema.js";
-import { definitionSchema, validateAnswers } from "../modules/forms/forms.service.js";
+import { bookingSchema } from "../modules/registrations/registrations.schema.js";
+import { definitionSchema, normalizeFields, validateAnswers } from "../modules/forms/forms.service.js";
 
 // Appends the Verhoeff check digit to 11 digits.
 export function withCheckDigit(eleven) {
@@ -53,27 +53,38 @@ test("slot transitions: holding statuses take and release stalls", () => {
   assert.equal(slotTransition("waitlisted", "rejected"), "none");
 });
 
+const FIELDS = normalizeFields([]);
+const publicSchema = bookingSchema(FIELDS);
+const managerSchema = bookingSchema(FIELDS, { manager: true });
 const valid = {
-  event_id: 1, quota_type: "general", name: "Asha Patil", business_name: "Asha Gruh Udyog",
-  nature_of_business: "Pickles and papad", category_id: 2, aadhaar: AADHAAR, udyam_number: "UDYAM-MH-26-0012345",
-  caste_category: "open", phone: "98765 43210", otp_token: "x", consent: true,
+  event_id: 1, name: "Asha Patil", business_name: "Asha Gruh Udyog", nature_of_business: "artisan",
+  product_categories: [2, "3"], aadhaar: AADHAAR, caste_category: "open", phone: "98765 43210", consent: true,
 };
 
-test("registration schema mirrors the public form rules", () => {
-  const ok = publicRegistrationSchema.safeParse(valid);
+test("booking schema mirrors the public form rules", () => {
+  const ok = publicSchema.safeParse(valid);
   assert.ok(ok.success);
   assert.equal(ok.data.phone, "9876543210");
+  assert.deepEqual(ok.data.product_categories, [2, 3]);
+  assert.equal(ok.data.udyam_number, "", "disabled system fields are stored empty");
 
-  const fields = (body) =>
-    publicRegistrationSchema.safeParse(body).error?.issues.map((i) => i.path.join(".")).sort() ?? [];
+  const fields = (body, schema = publicSchema) => schema.safeParse(body).error?.issues.map((i) => i.path.join(".")).sort() ?? [];
   assert.deepEqual(fields({ ...valid, aadhaar: "123412341234" }), ["aadhaar"]);
-  assert.deepEqual(fields({ ...valid, udyam_number: "12345" }), ["udyam_number"]);
+  assert.deepEqual(fields({ ...valid, aadhaar: "12341234123a" }), ["aadhaar"], "digits only");
   assert.deepEqual(fields({ ...valid, phone: "12345" }), ["phone"]);
   assert.deepEqual(fields({ ...valid, consent: false }), ["consent"]);
-  assert.deepEqual(fields({ ...valid, quota_type: "sponsored" }), ["quota_type"], "public cannot book sponsored stalls");
-  assert.deepEqual(fields({ ...valid, quota_type: "ews", caste_category: "open" }), ["quota_type"], "EWS quota needs an eligible category");
-  assert.ok(publicRegistrationSchema.safeParse({ ...valid, quota_type: "ews", caste_category: "sc" }).success);
-  assert.ok(managerRegistrationSchema.safeParse({ ...valid, quota_type: "sponsored" }).success, "managers allocate sponsored stalls");
+  assert.deepEqual(fields({ ...valid, product_categories: [] }), ["product_categories"]);
+  assert.deepEqual(fields({ ...valid, nature_of_business: "Pickles" }), ["nature_of_business"], "a dropdown value");
+  assert.deepEqual(fields({ ...valid, caste_category: "obc" }), ["caste_name"], "reserved categories give the caste name");
+  assert.ok(publicSchema.safeParse({ ...valid, caste_category: "obc", caste_name: "Kunbi" }).success);
+  assert.equal(publicSchema.parse({ ...valid, quota_type: "sponsored" }).quota_type, undefined, "the public cannot pick a quota");
+  assert.ok(managerSchema.safeParse({ ...valid, quota_type: "sponsored" }).success, "managers allocate sponsored stalls");
+  assert.deepEqual(fields({ ...valid, quota_type: "ews" }, managerSchema), ["quota_type"], "EWS quota needs an eligible category");
+
+  const udyamOn = bookingSchema(normalizeFields([{ key: "udyam_number", enabled: true, required: true, label_mr: "उद्यम" }]));
+  assert.deepEqual(fields(valid, udyamOn), ["udyam_number"]);
+  assert.deepEqual(fields({ ...valid, udyam_number: "12345" }, udyamOn), ["udyam_number"]);
+  assert.equal(udyamOn.parse({ ...valid, udyam_number: "udyam-mh-26-0012345" }).udyam_number, "UDYAM-MH-26-0012345");
 });
 
 test("form builder: definitions are validated and answers checked against them", () => {
@@ -85,7 +96,8 @@ test("form builder: definitions are validated and answers checked against them",
     ],
   });
   assert.ok(def.success);
-  assert.equal(definitionSchema.safeParse({ title: "x", fields: [{ key: "aadhaar", label_mr: "a", type: "text" }] }).success, false, "reserved key");
+  assert.equal(definitionSchema.safeParse({ title: "x", fields: [{ key: "event_id", label_mr: "a", type: "text" }] }).success, false, "reserved key");
+  assert.equal(definitionSchema.safeParse({ title: "x", fields: [{ key: "pick", label_mr: "a", type: "radio" }] }).success, false, "radio needs options");
   assert.equal(definitionSchema.safeParse({ title: "x", fields: [{ key: "pick", label_mr: "a", type: "select" }] }).success, false, "select needs options");
 
   assert.deepEqual(validateAnswers(def.data.fields, { stall_size: "small", years: "4", junk: 1 }), { stall_size: "small", years: 4 });

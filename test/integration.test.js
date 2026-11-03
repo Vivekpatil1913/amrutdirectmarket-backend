@@ -177,7 +177,7 @@ test("listing: search, filters, sorting and pagination", async () => {
   assert.ok(page.body.meta.total >= 8);
   const search = await call("GET", "/admin/categories?search=textile");
   assert.equal(search.body.data.length, 1);
-  const filtered = await call("GET", "/admin/nav-items?section=about");
+  const filtered = await call("GET", "/admin/nav-items?section=events");
   assert.equal(filtered.body.data.length, 1);
   const asc = (await call("GET", "/admin/categories?sort=name_en&order=asc&limit=100")).body.data.map((c) => c.name_en);
   const desc = (await call("GET", "/admin/categories?sort=name_en&order=desc&limit=100")).body.data.map((c) => c.name_en);

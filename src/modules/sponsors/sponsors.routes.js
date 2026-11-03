@@ -188,13 +188,32 @@ router.delete("/:id", asyncHandler(async (req, res) => {
 export default router;
 
 // Approved sponsors for the public marquee, title sponsors first.
+// The sponsor marquee: sponsors a super admin approved, then the sponsors
+// named on approved events (approving the event approved its logo). A
+// sponsor listed both ways appears once.
 export async function publicSponsors() {
   return query(
-    `SELECT s.id, s.name, s.tier, s.website, m.url AS logo_url, d.name_en AS district_name_en, d.name_mr AS district_name_mr
-       FROM sponsors s
-       LEFT JOIN media_assets m ON m.id = s.logo_media_id AND m.deleted_at IS NULL
-       LEFT JOIN districts d ON d.id = s.district_id
-      WHERE s.deleted_at IS NULL AND s.status = 'approved'
-      ORDER BY array_position(ARRAY['title', 'gold', 'silver', 'partner'], s.tier), s.display_order, s.id`
+    `WITH listed AS (
+       SELECT s.id::text AS id, s.name, s.tier, s.website, m.url AS logo_url,
+              d.name_en AS district_name_en, d.name_mr AS district_name_mr,
+              array_position(ARRAY['title', 'gold', 'silver', 'partner'], s.tier) AS rank, s.display_order AS ord
+         FROM sponsors s
+         LEFT JOIN media_assets m ON m.id = s.logo_media_id AND m.deleted_at IS NULL
+         LEFT JOIN districts d ON d.id = s.district_id
+        WHERE s.deleted_at IS NULL AND s.status = 'approved'
+     ), from_events AS (
+       SELECT DISTINCT ON (lower(e.sponsor_name)) 'event-' || e.id AS id, e.sponsor_name AS name, 'partner' AS tier,
+              '' AS website, m.url AS logo_url, d.name_en AS district_name_en, d.name_mr AS district_name_mr,
+              5 AS rank, 0 AS ord
+         FROM events e
+         JOIN districts d ON d.id = e.district_id
+         LEFT JOIN media_assets m ON m.id = e.sponsor_logo_media_id AND m.deleted_at IS NULL
+        WHERE e.deleted_at IS NULL AND e.status = 'published' AND e.approval_status = 'approved' AND e.sponsor_name <> ''
+          AND NOT EXISTS (SELECT 1 FROM listed l WHERE lower(l.name) = lower(e.sponsor_name))
+        ORDER BY lower(e.sponsor_name), (m.url IS NULL), e.start_date DESC
+     )
+     SELECT id, name, tier, website, logo_url, district_name_en, district_name_mr
+       FROM (SELECT * FROM listed UNION ALL SELECT * FROM from_events) x
+      ORDER BY rank, ord, name`
   );
 }

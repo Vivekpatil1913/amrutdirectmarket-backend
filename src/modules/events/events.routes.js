@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { districtScope, requirePortal } from "../../middleware/auth.js";
+import { districtScope, requirePortal, requireSuperadmin } from "../../middleware/auth.js";
 import { asyncHandler, paginated, parseOrThrow, success } from "../../lib/errors.js";
 import { idParam } from "../../lib/validators.js";
 import * as service from "./events.service.js";
@@ -23,6 +23,10 @@ router.post("/", asyncHandler(async (req, res) =>
 
 router.put("/:id", asyncHandler(async (req, res) =>
   success(res, await service.update(id(req), req.body, req.user, districtScope(req)))));
+
+// Super admin approval of a district manager's event.
+router.post("/:id/review", requireSuperadmin, asyncHandler(async (req, res) =>
+  success(res, await service.review(id(req), req.body, req.user))));
 
 router.delete("/:id", asyncHandler(async (req, res) =>
   success(res, await service.softDelete(id(req), req.user, districtScope(req)))));
