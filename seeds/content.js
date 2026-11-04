@@ -103,20 +103,6 @@ export const SEED_SECTIONS = {
     lead_mr: "लहान उत्पादकांना घराजवळच ग्राहकांपर्यंत पोहोचण्याचा आणि व्यवसाय वाढवण्याचा सोपा, पाठबळ असलेला मार्ग.",
     lead_en: "A simple, supported way for small producers to reach customers and grow — close to home.",
   },
-  participate: {
-    badge_mr: "सहभाग",
-    badge_en: "Participate",
-    title_mr: "स्टॉल घेणे सोपे आहे",
-    title_en: "Taking a stall is simple",
-    lead_mr: "महाराष्ट्रातील कोणताही स्थानिक उद्योजक, कारागीर, शेतकरी किंवा लघु व्यावसायिक अर्ज करू शकतो. महिला उद्योजक, स्वयं-सहायता गट आणि अमृत प्रशिक्षणार्थींना प्राधान्य दिले जाते.",
-    lead_en: "Any local entrepreneur, artisan, farmer or small business owner from Maharashtra can apply. Priority is given to women entrepreneurs, self-help groups and AMRUT training graduates.",
-    who_label_mr: "कोण अर्ज करू शकतो",
-    who_label_en: "Who can apply",
-    cta_mr: "नोंदणी करा",
-    cta_en: "Register",
-    steps_label_mr: "सहभागाची प्रक्रिया",
-    steps_label_en: "How participation works",
-  },
   register: {
     badge_mr: "नोंदणी",
     badge_en: "Register",
@@ -180,10 +166,10 @@ export const SEED_SECTIONS = {
 export const SEED_COLLECTIONS = {
   nav_items: [
     { label_mr: "मुख्य पृष्ठ", label_en: "Home", section: "home" },
+    { label_mr: "बाजारातील यशोगाथा", label_en: "Success Stories from the market", section: "success-stories" },
     { label_mr: "वैशिष्ट्ये", label_en: "Highlights", section: "highlights" },
-    { label_mr: "आगामी प्रदर्शने", label_en: "Upcoming events", section: "events" },
-    { label_mr: "सहभाग", label_en: "Participate", section: "participate" },
-    { label_mr: "जिल्हे", label_en: "Districts", section: "map" },
+    { label_mr: "सहभाग", label_en: "Participate", section: "upcoming-events" },
+    { label_mr: "जिल्हानिहाय प्रदर्शने", label_en: "Events by district", section: "events-by-district" },
   ],
   hero_facts: [
     { label_mr: "आयोजक", label_en: "Organised by", value_mr: "अमृत", value_en: "AMRUT" },
@@ -192,10 +178,10 @@ export const SEED_COLLECTIONS = {
     { label_mr: "मध्यस्थ", label_en: "Middlemen", value_mr: "नाही", value_en: "None" },
   ],
   quick_links: [
-    { title_mr: "अमृत पेठ थेट बाजार पेठ", title_en: "AMRUT Peth Direct Market", desc_mr: "अमृत पेठ थेट बाजार पेठ म्हणजे काय", desc_en: "What AMRUT Peth Direct Market is", icon: "info", section: "events" },
+    { title_mr: "अमृत पेठ थेट बाजार पेठ", title_en: "AMRUT Peth Direct Market", desc_mr: "अमृत पेठ थेट बाजार पेठ म्हणजे काय", desc_en: "What AMRUT Peth Direct Market is", icon: "info", section: "upcoming-events" },
     { title_mr: "वैशिष्ट्ये", title_en: "Highlights", desc_mr: "उद्योजकांसाठी फायदे", desc_en: "Benefits for local businesses", icon: "sparkle", section: "highlights" },
-    { title_mr: "सहभाग", title_en: "Participate", desc_mr: "स्टॉल घेण्याची सोपी प्रक्रिया", desc_en: "How to take a stall", icon: "store", section: "participate" },
-    { title_mr: "संपर्क", title_en: "Contact", desc_mr: "चौकशी व संपर्क", desc_en: "Enquiries and contact", icon: "phone", section: "map" },
+    { title_mr: "सहभाग", title_en: "Participate", desc_mr: "स्टॉल घेण्याची सोपी प्रक्रिया", desc_en: "How to take a stall", icon: "store", section: "upcoming-events" },
+    { title_mr: "संपर्क", title_en: "Contact", desc_mr: "चौकशी व संपर्क", desc_en: "Enquiries and contact", icon: "phone", section: "events-by-district" },
   ],
   categories: [
     { name_mr: "अन्न व कृषी", name_en: "Food & Agriculture", slug: "food-and-agriculture" },
@@ -212,19 +198,6 @@ export const SEED_COLLECTIONS = {
     { title_mr: "शासनाचे पाठबळ", title_en: "Government-backed", desc_mr: "महाराष्ट्र शासनाची स्वायत्त संस्था असलेल्या अमृतद्वारे आयोजित.", desc_en: "Organised by AMRUT, an autonomous institution of the Government of Maharashtra.", icon: "building" },
     { title_mr: "प्रदर्शनात स्टॉल", title_en: "Stall at an exhibition", desc_mr: "महाराष्ट्रभर भरणाऱ्या अमृत पेठ थेट बाजार पेठ प्रदर्शनांमध्ये स्टॉल घ्या.", desc_en: "Take a stall at an AMRUT Peth Direct Market exhibition held across Maharashtra.", icon: "store" },
     { title_mr: "ब्रँड वाढवा", title_en: "Grow your brand", desc_mr: "आपली ब्रँड ओळख निर्माण करा, ग्राहकांचा अभिप्राय मिळवा आणि ग्राहकवर्ग वाढवा.", desc_en: "Build your brand identity, gather customer feedback and grow your customer base.", icon: "trend" },
-  ],
-  eligibility_groups: [
-    { name_mr: "स्थानिक उद्योजक", name_en: "Local entrepreneurs" },
-    { name_mr: "कारागीर", name_en: "Artisans" },
-    { name_mr: "शेतकरी", name_en: "Farmers" },
-    { name_mr: "लघु व्यवसाय", name_en: "Small businesses" },
-    { name_mr: "महिला उद्योजक", name_en: "Women entrepreneurs" },
-    { name_mr: "स्वयं-सहायता गट", name_en: "Self-help groups" },
-  ],
-  participation_steps: [
-    { title_mr: "स्टॉल बुक करा", title_en: "Book a stall", desc_mr: "आगामी प्रदर्शनावरील “स्टॉल बुक करा” वापरून आपली व व्यवसायाची माहिती द्या.", desc_en: "Use “Book a Stall” on an upcoming event and give your and your business’s details.", icon: "send" },
-    { title_mr: "अमृतकडून निश्चिती", title_en: "Confirm with AMRUT", desc_mr: "अधिकृत स्टॉल बुकिंग आपल्या अमृत जिल्हा कार्यालयामार्फत निश्चित केले जाते.", desc_en: "Official stall bookings are confirmed through your AMRUT district office.", icon: "building" },
-    { title_mr: "स्टॉल लावा व विक्री करा", title_en: "Set up and sell", desc_mr: "प्रदर्शनात आपली उत्पादने मांडा आणि थेट ग्राहकांना विका.", desc_en: "Display your products at the exhibition and sell directly to customers.", icon: "store" },
   ],
   enquiry_subjects: [
     { code: "stall", label_mr: "स्टॉल बुकिंग चौकशी", label_en: "Stall Booking Query" },

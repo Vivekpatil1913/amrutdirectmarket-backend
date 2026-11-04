@@ -4,11 +4,11 @@
 // public site renders; adding one here without a matching section on the site
 // would produce a dead link.
 export const SECTION_TARGETS = [
-  { value: "home", label: "Home (success stories)" },
+  { value: "home", label: "Home (top of page)" },
+  { value: "success-stories", label: "Success stories" },
   { value: "highlights", label: "Event highlights" },
-  { value: "events", label: "Upcoming events" },
-  { value: "participate", label: "Participation" },
-  { value: "map", label: "District map" },
+  { value: "upcoming-events", label: "Upcoming events" },
+  { value: "events-by-district", label: "Events by district" },
 ];
 export const SECTION_TARGET_VALUES = SECTION_TARGETS.map((t) => t.value);
 

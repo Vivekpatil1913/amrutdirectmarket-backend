@@ -29,7 +29,7 @@ Every response carries an `X-Request-Id` header; unexpected errors are logged wi
 
 | Method | Path | Description |
 |---|---|---|
-| GET | `/public/site` | Everything the home page renders: `{ sections: { settings, contact, hero, about, highlights, participate, register, footer }, collections: { navItems, heroFacts, quickLinks, categories, highlights, eligibilityGroups, participationSteps, enquirySubjects, socialLinks } }`. Published, non-deleted content only; image fields are URLs. `Cache-Control: no-cache` + ETag. |
+| GET | `/public/site` | Everything the home page renders: `{ sections: { settings, contact, hero, about, highlights, register, footer }, collections: { navItems, heroFacts, quickLinks, categories, highlights, enquirySubjects, socialLinks } }`. Published, non-deleted content only; image fields are URLs. `Cache-Control: no-cache` + ETag. |
 | GET | `/public/sections/:key` | One published section. |
 | GET | `/public/<collection>` | Published records of one collection, in display order. |
 | POST | `/public/enquiries` | Submit the registration/enquiry form. Rate-limited (10 / 15 min / IP). |
@@ -65,7 +65,7 @@ Sessions are stored in `admin_sessions`, expire after `SESSION_HOURS` of inactiv
 
 ### Page sections — `/admin/sections`
 
-Keys: `settings`, `contact` (admin role), `hero`, `about`, `highlights`, `participate`, `register`, `footer`. Each has a **draft** and a **published** copy; the site only reads the published one.
+Keys: `settings`, `contact` (admin role), `hero`, `about`, `highlights`, `register`, `footer`. Each has a **draft** and a **published** copy; the site only reads the published one.
 
 | Method | Path | Description |
 |---|---|---|
@@ -87,8 +87,6 @@ Image fields are `{ "media_id": 12, "url": "" }`; the server checks the media ex
 | `quick-links` | `quick_links` | `section` | |
 | `categories` | `categories` | | `slug` (auto from English name if empty) |
 | `highlights` | `highlights` | | |
-| `eligibility-groups` | `eligibility_groups` | | |
-| `participation-steps` | `participation_steps` | | |
 | `enquiry-subjects` | `enquiry_subjects` | | `code` (auto from English label if empty) |
 | `social-links` | `social_links` | | |
 

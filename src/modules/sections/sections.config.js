@@ -95,19 +95,6 @@ export const SECTIONS = [
     ],
   },
   {
-    key: "participate",
-    title: "Participation Section",
-    description: "Heading, lead, eligibility label, button and steps label.",
-    fields: [
-      { key: "badge", label: "Badge", type: "text", bi: true, max: 60, group: "Text" },
-      { key: "title", label: "Title", type: "text", bi: true, required: true, max: 160, group: "Text" },
-      { key: "lead", label: "Lead", type: "textarea", bi: true, max: 600, group: "Text" },
-      { key: "who_label", label: "Eligibility list label (screen readers)", type: "text", bi: true, max: 80, group: "Labels" },
-      { key: "cta", label: "Button label", type: "text", bi: true, required: true, max: 60, group: "Labels" },
-      { key: "steps_label", label: "Steps list label (screen readers)", type: "text", bi: true, max: 80, group: "Labels" },
-    ],
-  },
-  {
     key: "register",
     title: "Registration Section",
     description: "Enquiry form texts, success messages and the contact panel.",
