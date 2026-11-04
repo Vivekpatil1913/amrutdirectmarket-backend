@@ -2,6 +2,12 @@
 -- carry the full "Create Event (Bajar Peth)" details, and the stall booking
 -- form becomes fully form-builder managed (system + custom fields, file
 -- uploads, multi-select product categories). Adds the visitor counter.
+--
+-- Some development databases had parts of this schema added by hand before
+-- this file ran: nullable varchar columns, no constraints, a differently named
+-- counter. Every step therefore tolerates that state, brings it to the
+-- definitions below and keeps the data already entered. On a fresh database
+-- the repair steps change nothing.
 
 -- ====================================================================
 -- EVENTS: creation details and the approval workflow
@@ -10,26 +16,51 @@
 -- ====================================================================
 
 ALTER TABLE events
-  ADD COLUMN city_mr               TEXT NOT NULL DEFAULT '',
-  ADD COLUMN city_en               TEXT NOT NULL DEFAULT '',
-  ADD COLUMN event_time            TEXT NOT NULL DEFAULT '',
-  ADD COLUMN venue_map_link        TEXT NOT NULL DEFAULT '',
-  ADD COLUMN contact_phone         TEXT NOT NULL DEFAULT '',
-  ADD COLUMN sponsor_name          TEXT NOT NULL DEFAULT '',
-  ADD COLUMN sponsor_logo_media_id INTEGER REFERENCES media_assets(id) ON DELETE SET NULL,
-  ADD COLUMN approval_status       TEXT NOT NULL DEFAULT 'approved'
-                                   CHECK (approval_status IN ('pending', 'approved', 'rejected')),
-  ADD COLUMN review_note           TEXT NOT NULL DEFAULT '',
-  ADD COLUMN submitted_at          TIMESTAMPTZ,
-  ADD COLUMN reviewed_by           INTEGER REFERENCES admin_users(id) ON DELETE SET NULL,
-  ADD COLUMN reviewed_at           TIMESTAMPTZ;
+  ADD COLUMN IF NOT EXISTS city_mr               TEXT NOT NULL DEFAULT '',
+  ADD COLUMN IF NOT EXISTS city_en               TEXT NOT NULL DEFAULT '',
+  ADD COLUMN IF NOT EXISTS event_time            TEXT NOT NULL DEFAULT '',
+  ADD COLUMN IF NOT EXISTS venue_map_link        TEXT NOT NULL DEFAULT '',
+  ADD COLUMN IF NOT EXISTS contact_phone         TEXT NOT NULL DEFAULT '',
+  ADD COLUMN IF NOT EXISTS sponsor_name          TEXT NOT NULL DEFAULT '',
+  ADD COLUMN IF NOT EXISTS sponsor_logo_media_id INTEGER REFERENCES media_assets(id) ON DELETE SET NULL,
+  ADD COLUMN IF NOT EXISTS approval_status       TEXT NOT NULL DEFAULT 'approved'
+                                             CHECK (approval_status IN ('pending', 'approved', 'rejected')),
+  ADD COLUMN IF NOT EXISTS review_note           TEXT NOT NULL DEFAULT '',
+  ADD COLUMN IF NOT EXISTS submitted_at          TIMESTAMPTZ,
+  ADD COLUMN IF NOT EXISTS reviewed_by           INTEGER REFERENCES admin_users(id) ON DELETE SET NULL,
+  ADD COLUMN IF NOT EXISTS reviewed_at           TIMESTAMPTZ;
 
-ALTER TABLE events ALTER COLUMN approval_status SET DEFAULT 'pending';
+UPDATE events SET approval_status = 'approved' WHERE approval_status IS NULL;
 
-DROP INDEX events_public;
+ALTER TABLE events
+  ALTER COLUMN submitted_at TYPE TIMESTAMPTZ,
+  ALTER COLUMN reviewed_at TYPE TIMESTAMPTZ,
+  ALTER COLUMN approval_status TYPE TEXT,
+  ALTER COLUMN approval_status SET NOT NULL,
+  ALTER COLUMN approval_status SET DEFAULT 'pending';
+
+DO $$
+DECLARE c TEXT;
+BEGIN
+  FOREACH c IN ARRAY ARRAY['city_mr', 'city_en', 'event_time', 'venue_map_link', 'contact_phone', 'sponsor_name', 'review_note'] LOOP
+    EXECUTE format('UPDATE events SET %1$I = '''' WHERE %1$I IS NULL', c);
+    EXECUTE format('ALTER TABLE events ALTER COLUMN %1$I TYPE TEXT, ALTER COLUMN %1$I SET DEFAULT '''', ALTER COLUMN %1$I SET NOT NULL', c);
+  END LOOP;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'events_approval_status_check') THEN
+    ALTER TABLE events ADD CONSTRAINT events_approval_status_check CHECK (approval_status IN ('pending', 'approved', 'rejected'));
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'events_sponsor_logo_media_id_fkey') THEN
+    ALTER TABLE events ADD CONSTRAINT events_sponsor_logo_media_id_fkey FOREIGN KEY (sponsor_logo_media_id) REFERENCES media_assets(id) ON DELETE SET NULL;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'events_reviewed_by_fkey') THEN
+    ALTER TABLE events ADD CONSTRAINT events_reviewed_by_fkey FOREIGN KEY (reviewed_by) REFERENCES admin_users(id) ON DELETE SET NULL;
+  END IF;
+END $$;
+
+DROP INDEX IF EXISTS events_public;
 CREATE INDEX events_public ON events (start_date)
   WHERE deleted_at IS NULL AND status = 'published' AND approval_status = 'approved';
-CREATE INDEX events_approval_queue ON events (submitted_at)
+CREATE INDEX IF NOT EXISTS events_approval_queue ON events (submitted_at)
   WHERE deleted_at IS NULL AND approval_status = 'pending';
 
 -- ====================================================================
@@ -40,17 +71,34 @@ CREATE INDEX events_approval_queue ON events (submitted_at)
 -- ====================================================================
 
 ALTER TABLE vendor_registrations
-  ADD COLUMN category_ids INTEGER[] NOT NULL DEFAULT '{}',
-  ADD COLUMN caste_name   TEXT NOT NULL DEFAULT '',
-  ADD COLUMN files        JSONB NOT NULL DEFAULT '{}'::JSONB;   -- { field_key: { filename, original_name, mime_type, size_bytes } }
+  ADD COLUMN IF NOT EXISTS category_ids INTEGER[] NOT NULL DEFAULT '{}',
+  ADD COLUMN IF NOT EXISTS caste_name   TEXT NOT NULL DEFAULT '',
+  ADD COLUMN IF NOT EXISTS files        JSONB NOT NULL DEFAULT '{}'::JSONB;   -- { field_key: { filename, original_name, mime_type, size_bytes } }
+
+UPDATE vendor_registrations
+   SET category_ids = COALESCE(category_ids, '{}'),
+       caste_name = COALESCE(caste_name, ''),
+       files = COALESCE(files, '{}'::JSONB)
+ WHERE category_ids IS NULL OR caste_name IS NULL OR files IS NULL;
+
+ALTER TABLE vendor_registrations
+  ALTER COLUMN category_ids SET DEFAULT '{}',
+  ALTER COLUMN category_ids SET NOT NULL,
+  ALTER COLUMN caste_name TYPE TEXT,
+  ALTER COLUMN caste_name SET DEFAULT '',
+  ALTER COLUMN caste_name SET NOT NULL,
+  ALTER COLUMN files SET DEFAULT '{}'::JSONB,
+  ALTER COLUMN files SET NOT NULL;
 
 ALTER TABLE vendor_registrations ALTER COLUMN udyam_number SET DEFAULT '';
 ALTER TABLE vendor_registrations ALTER COLUMN phone SET DEFAULT '';
 
-UPDATE vendor_registrations SET category_ids = ARRAY[category_id] WHERE category_id IS NOT NULL;
+-- Only rows without a selection: a multi-select already saved is kept.
+UPDATE vendor_registrations SET category_ids = ARRAY[category_id]
+ WHERE category_id IS NOT NULL AND cardinality(category_ids) = 0;
 
 -- The public form no longer sends an OTP (see the form builder instead).
-DROP TABLE otp_verifications;
+DROP TABLE IF EXISTS otp_verifications;
 
 -- ====================================================================
 -- STALL BOOKING FORM: every field is now part of the definition.
@@ -83,20 +131,45 @@ UPDATE form_definitions
          {"key": "email", "type": "email", "system": true, "label_mr": "ईमेल", "label_en": "Email", "required": false, "enabled": false, "options": []},
          {"key": "udyam_number", "type": "text", "system": true, "label_mr": "उद्यम नोंदणी क्रमांक", "label_en": "Udyam Registration Number", "required": false, "enabled": false, "options": []}
        ]'::JSONB || fields
- WHERE key = 'vendor_registration';
+ WHERE key = 'vendor_registration'
+   -- "product_categories" is reserved for the system field, so its presence
+   -- means the definition already has them and must not get a second copy.
+   AND NOT fields @> '[{"key": "product_categories"}]'::JSONB;
 
 -- ====================================================================
 -- SITE COUNTERS (home-page statistics). Visitors start at a base of
 -- one million, as the brief requires, and count up from there.
 -- ====================================================================
 
-CREATE TABLE site_counters (
+CREATE TABLE IF NOT EXISTS site_counters (
   key         TEXT PRIMARY KEY,
   value       BIGINT NOT NULL DEFAULT 0 CHECK (value >= 0),
   updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-INSERT INTO site_counters (key, value) VALUES ('visitors', 1000000);
+UPDATE site_counters SET updated_at = NOW() WHERE updated_at IS NULL;
+UPDATE site_counters SET value = 0 WHERE value IS NULL;
+
+ALTER TABLE site_counters
+  ALTER COLUMN key TYPE TEXT,
+  ALTER COLUMN value SET NOT NULL,
+  ALTER COLUMN updated_at TYPE TIMESTAMPTZ,
+  ALTER COLUMN updated_at SET DEFAULT NOW(),
+  ALTER COLUMN updated_at SET NOT NULL;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'site_counters_value_check') THEN
+    ALTER TABLE site_counters ADD CONSTRAINT site_counters_value_check CHECK (value >= 0);
+  END IF;
+END $$;
+
+-- The site reads the 'visitors' key; a count kept under the older name carries over.
+UPDATE site_counters SET key = 'visitors'
+ WHERE key = 'total_visitors'
+   AND NOT EXISTS (SELECT 1 FROM site_counters WHERE key = 'visitors');
+
+INSERT INTO site_counters (key, value) VALUES ('visitors', 1000000) ON CONFLICT (key) DO NOTHING;
 
 -- ====================================================================
 -- HOME-PAGE SECTIONS: the introduction, "Why AMRUT Peth" and contact
