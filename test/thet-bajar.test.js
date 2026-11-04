@@ -292,12 +292,12 @@ test("public home data: statistics, highlights, district event counts and the sl
   assert.equal(data.stats.live_events, 1);
   assert.equal(data.stats.total_participants, 0);
   assert.ok(data.stats.total_visitors >= 1000000, "visitors start at a base of one million");
-  assert.deepEqual(data.highlights.map((e) => e.id), [eventId, past.id], "latest two events, newest first");
+  assert.deepEqual(data.highlights.map((e) => e.id), [eventId], "highlights are the events running today");
   assert.deepEqual(data.events.map((e) => e.id), [eventId], "completed events are not bookable cards");
   assert.deepEqual(data.stories.map((e) => e.id), [past.id], "stories come from completed events only");
   const p = data.districts.find((d) => d.code === "pune");
   assert.equal(p.event_count, 2, "the map counts every event organised in the district");
-  assert.deepEqual(p.event_ids, [eventId]);
+  assert.deepEqual(p.event_ids, [], "the map's upcoming list leaves out an event already running");
   assert.equal(data.districts.find((d) => d.code === "akola").event_count, 0);
 
   const s = await slots();

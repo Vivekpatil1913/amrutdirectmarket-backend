@@ -147,7 +147,7 @@ Read-only audit trail: `GET` with `search`, `action`, `entity`.
 
 | Method | Path | Description |
 |---|---|---|
-| GET | `/public/thet-bajar` | Home data: `stories` (completed events for the carousel), `stats` (cached for 5 minutes; `total_events` = approved events completed to date, `total_participants` = approved stall bookings, `total_visitors` = visitor counter, plus live / upcoming counts), `highlights` (the latest two events that have started, newest first), live + upcoming `events` (with `quotas`, `bookable`, `city`, `event_time`, `venue_map_link`), active `districts` (lat/lng, `event_ids` of upcoming events, `event_count` = every approved event organised there) and `sponsors` (approved sponsors, then sponsors named on approved events). |
+| GET | `/public/thet-bajar` | Home data: `stories` (completed events for the carousel), `stats` (cached for 5 minutes; `total_events` = approved events completed to date, `total_participants` = approved stall bookings, `total_visitors` = visitor counter, plus live / upcoming counts), `highlights` (the events running today), live + upcoming `events` (with `quotas`, `bookable`, `city`, `event_time`, `venue_map_link`), active `districts` (lat/lng, `event_ids` of upcoming events, `event_count` = every approved event organised there) and `sponsors` (approved sponsors, then sponsors named on approved events). |
 | POST | `/public/visits` | Counts a visit; `{ total_visitors, counted }`. The counter starts at 1,000,000. Limited to 20 per connection per hour (beyond that the total is returned uncounted). |
 | GET | `/public/events?district=<code>&phase=current\|past` | Public events. |
 | GET | `/public/events/:id` | One event with its `gallery`. |

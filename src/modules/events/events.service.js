@@ -302,23 +302,6 @@ export async function listPublic({ phases = ["live", "upcoming"], district = "",
   return rows.map((e) => ({ ...e, bookable: bookable(e) }));
 }
 
-// The most recent events that have started (live or completed), newest
-// first: the home page's event highlights. Upcoming ones fill in while too
-// few have started.
-export async function latestHighlights(limit = 2) {
-  const started = await query(
-    `SELECT ${PUBLIC_COLUMNS} ${PUBLIC_FROM} AND e.status <> 'cancelled' AND CURRENT_DATE >= e.start_date
-     ORDER BY e.start_date DESC, e.id DESC LIMIT $1`,
-    [limit]
-  );
-  const upcoming = started.length >= limit ? [] : await query(
-    `SELECT ${PUBLIC_COLUMNS} ${PUBLIC_FROM} AND CURRENT_DATE < e.start_date
-     ORDER BY e.start_date ASC, e.id ASC LIMIT $1`,
-    [limit - started.length]
-  );
-  return [...started, ...upcoming].map((e) => ({ ...e, bookable: bookable(e) }));
-}
-
 // A story is at most STORY_MAX_CHARS; an event without one uses the opening
 // of its description.
 const storyText = (story, description) =>

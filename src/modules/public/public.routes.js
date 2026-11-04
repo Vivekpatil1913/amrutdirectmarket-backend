@@ -74,28 +74,29 @@ async function eventCountsByDistrict() {
   return new Map(rows.map((r) => [r.district_id, r.n]));
 }
 
-// The home page's live data: statistics, completed events' stories, the latest
-// events' highlights, live
+// The home page's live data: statistics, completed events' stories, the events
+// running today as highlights, live
 // and upcoming events with their stall availability, districts for the map
 // and approved sponsors.
 router.get("/thet-bajar", asyncHandler(async (_req, res) => {
-  const [stats, stories, highlights, upcoming, districts, counts, sponsors] = await Promise.all([
+  const [stats, stories, current, districts, counts, sponsors] = await Promise.all([
     cachedHomeStats(),
     events.pastStories(),
-    events.latestHighlights(2),
-    events.listPublic({ limit: 24 }),
+    events.listPublic({ limit: 200 }),
     listDistricts({ activeOnly: true }),
     eventCountsByDistrict(),
     publicSponsors(),
   ]);
   const byDistrict = new Map();
-  for (const e of upcoming) byDistrict.set(e.district_id, [...(byDistrict.get(e.district_id) ?? []), e.id]);
+  for (const e of current) {
+    if (e.phase === "upcoming") byDistrict.set(e.district_id, [...(byDistrict.get(e.district_id) ?? []), e.id]);
+  }
   res.set("Cache-Control", "no-cache");
   return success(res, {
     stats: { ...stats, total_visitors: Number(stats.total_visitors ?? 0) },
     stories,
-    highlights,
-    events: upcoming,
+    highlights: current.filter((e) => e.phase === "live"),
+    events: current,
     districts: districts.map((d) => ({ ...d, event_ids: byDistrict.get(d.id) ?? [], event_count: counts.get(d.id) ?? 0 })),
     sponsors,
   });
