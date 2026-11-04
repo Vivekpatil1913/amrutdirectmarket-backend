@@ -8,6 +8,7 @@ import {
   COVER_IMAGE_MAX_MB, COVER_IMAGE_TYPES, EVENT_APPROVAL_STATUSES, EVENT_STATUSES, QUOTA_TYPES, STORY_MAX_CHARS,
 } from "../../lib/constants.js";
 import { audit } from "../../lib/audit.js";
+import { canModerate, districtInScope } from "../../middleware/auth.js";
 import { liveMedia } from "../../lib/media.js";
 import { setQuotaTotal } from "../registrations/slots.js";
 
@@ -34,8 +35,6 @@ export const eventSchema = z
     title_en: cleanString(160).default(""),
     description_mr: cleanString(2000).default(""),
     description_en: cleanString(2000).default(""),
-    story_mr: cleanString(STORY_MAX_CHARS).default(""),
-    story_en: cleanString(STORY_MAX_CHARS).default(""),
     venue_mr: requiredString(200, "Event venue"),
     venue_en: cleanString(200).default(""),
     city_mr: cleanString(100).default(""),
@@ -101,8 +100,8 @@ export async function list(rawQuery, scope) {
     params.push(value);
     where.push(sql.replaceAll("$?", `$${params.length}`));
   };
-  if (scope) add(scope, "e.district_id = $?");
-  else if (q.district) add(q.district, "e.district_id = $?");
+  if (scope) add(scope, "e.district_id = ANY($?)");
+  if (q.district) add(q.district, "e.district_id = $?");
   if (q.status) add(q.status, "e.status = $?");
   if (q.approval) add(q.approval, "e.approval_status = $?");
   if (q.phase) add(q.phase, `(${PHASE_SQL}) = $?`);
@@ -124,7 +123,7 @@ export async function list(rawQuery, scope) {
 // district's event gets 404, exactly as if it did not exist.
 export async function getById(id, scope, { includeDeleted = false, db = { queryOne } } = {}) {
   const row = await db.queryOne(
-    `${SELECT} WHERE e.id = $1 ${includeDeleted ? "" : "AND e.deleted_at IS NULL"} AND ($2::int IS NULL OR e.district_id = $2)`,
+    `${SELECT} WHERE e.id = $1 ${includeDeleted ? "" : "AND e.deleted_at IS NULL"} AND ($2::int[] IS NULL OR e.district_id = ANY($2))`,
     [id, scope]
   );
   if (!row) throw notFound("Event");
@@ -133,7 +132,7 @@ export async function getById(id, scope, { includeDeleted = false, db = { queryO
 
 async function resolveDistrict(data, scope) {
   // A manager always works in their own district, whatever the body says.
-  const districtId = scope ?? data.district_id;
+  const districtId = districtInScope(scope, data.district_id);
   if (!districtId) throw validation([{ field: "district_id", message: "Choose the district" }]);
   const d = await queryOne("SELECT id FROM districts WHERE id = $1 AND deleted_at IS NULL AND is_active = TRUE", [districtId]);
   if (!d) throw validation([{ field: "district_id", message: "Choose a valid district" }]);
@@ -166,7 +165,6 @@ const columnValues = (data) => [
   data.title_mr, data.title_en, data.description_mr, data.description_en, data.venue_mr, data.venue_en,
   data.city_mr, data.city_en, data.start_date, data.end_date, data.event_time, data.venue_map_link, data.contact_phone,
   data.sponsor_name, data.sponsor_logo_media_id, data.status, data.registration_open, data.cover_media_id,
-  data.story_mr, data.story_en,
 ];
 
 async function applyQuotas(tx, eventId, quotas) {
@@ -186,16 +184,15 @@ export async function create(body, user, scope) {
   const data = parseOrThrow(eventSchema, body ?? {});
   const districtId = await resolveDistrict(data, scope);
   await assertImages(data);
-  const approved = !scope;
+  const approved = canModerate(user);
   const id = await transaction(async (tx) => {
     const row = await tx.queryOne(
       `INSERT INTO events (district_id, title_mr, title_en, description_mr, description_en, venue_mr, venue_en,
                            city_mr, city_en, start_date, end_date, event_time, venue_map_link, contact_phone,
                            sponsor_name, sponsor_logo_media_id, status, registration_open, cover_media_id,
-                           story_mr, story_en,
                            approval_status, submitted_at, reviewed_by, reviewed_at, created_by, updated_by)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21,
-               $22, NOW(), $23, $24, $25, $25) RETURNING id`,
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19,
+               $20, NOW(), $21, $22, $23, $23) RETURNING id`,
       [districtId, ...columnValues(data), approved ? "approved" : "pending", approved ? user.id : null,
         approved ? new Date() : null, user.id]
     );
@@ -215,18 +212,18 @@ export async function update(id, body, user, scope) {
   await assertImages(data, before);
   // A manager's change goes back to the approval queue (the event leaves the
   // public site until it is approved again); bookings already made stay.
-  const resubmit = Boolean(scope);
+  const resubmit = !canModerate(user);
   await transaction(async (tx) => {
     await tx.query(
       `UPDATE events SET district_id = $1, title_mr = $2, title_en = $3, description_mr = $4, description_en = $5,
               venue_mr = $6, venue_en = $7, city_mr = $8, city_en = $9, start_date = $10, end_date = $11, event_time = $12,
               venue_map_link = $13, contact_phone = $14, sponsor_name = $15, sponsor_logo_media_id = $16, status = $17,
-              registration_open = $18, cover_media_id = $19, story_mr = $20, story_en = $21,
-              updated_by = $22, updated_at = NOW(),
-              approval_status = CASE WHEN $23 THEN 'pending' ELSE approval_status END,
-              submitted_at = CASE WHEN $23 THEN NOW() ELSE submitted_at END,
-              review_note = CASE WHEN $23 THEN '' ELSE review_note END
-        WHERE id = $24 AND deleted_at IS NULL`,
+              registration_open = $18, cover_media_id = $19,
+              updated_by = $20, updated_at = NOW(),
+              approval_status = CASE WHEN $21 THEN 'pending' ELSE approval_status END,
+              submitted_at = CASE WHEN $21 THEN NOW() ELSE submitted_at END,
+              review_note = CASE WHEN $21 THEN '' ELSE review_note END
+        WHERE id = $22 AND deleted_at IS NULL`,
       [districtId, ...columnValues(data), user.id, resubmit, id]
     );
     await applyQuotas(tx, id, data.quotas);
@@ -236,10 +233,10 @@ export async function update(id, body, user, scope) {
   return getById(id, scope);
 }
 
-// Super admin decision on a district manager's event.
-export async function review(id, body, user) {
+// A super admin's or divisional manager's decision on a submitted event.
+export async function review(id, body, user, scope) {
   const data = parseOrThrow(reviewSchema, body ?? {});
-  const before = await getById(id, null);
+  const before = await getById(id, scope);
   await query(
     `UPDATE events SET approval_status = $1, review_note = $2, reviewed_by = $3, reviewed_at = NOW(), updated_at = NOW()
       WHERE id = $4`,
@@ -247,7 +244,7 @@ export async function review(id, body, user) {
   );
   await audit(user, "status", "events", id,
     `${data.decision === "approved" ? "Approved" : "Rejected"} event "${before.title_en || before.title_mr}"${data.note ? `: ${data.note}` : ""}`);
-  return getById(id, null);
+  return getById(id, scope);
 }
 
 // Events with applications are cancelled, not deleted, so applicants keep a
@@ -263,7 +260,7 @@ export async function softDelete(id, user, scope) {
 export async function restore(id, user, scope) {
   const before = await getById(id, scope, { includeDeleted: true });
   if (!before.deleted_at) throw notFound("Deleted event");
-  if (scope && before.district_id !== scope) throw forbidden();
+  if (scope && !scope.includes(before.district_id)) throw forbidden();
   await query("UPDATE events SET deleted_at = NULL, updated_by = $1, updated_at = NOW() WHERE id = $2", [user.id, id]);
   await audit(user, "restore", "events", id, `Restored event "${before.title_en || before.title_mr}"`);
   return getById(id, scope);
@@ -272,7 +269,6 @@ export async function restore(id, user, scope) {
 // ── Public ────────────────────────────────────────────────────────────────
 
 const PUBLIC_COLUMNS = `e.id, e.district_id, e.title_mr, e.title_en, e.description_mr, e.description_en,
-  e.story_mr, e.story_en,
   e.venue_mr, e.venue_en, e.city_mr, e.city_en, e.start_date, e.end_date, e.event_time, e.venue_map_link,
   e.contact_phone, e.sponsor_name, e.registration_open, ${PHASE_SQL} AS phase, ${QUOTAS_SQL} AS quotas,
   d.code AS district_code, d.name_mr AS district_name_mr, d.name_en AS district_name_en,
@@ -302,23 +298,34 @@ export async function listPublic({ phases = ["live", "upcoming"], district = "",
   return rows.map((e) => ({ ...e, bookable: bookable(e) }));
 }
 
-// A story is at most STORY_MAX_CHARS; an event without one uses the opening
-// of its description.
-const storyText = (story, description) =>
-  story || (description.length > STORY_MAX_CHARS ? `${description.slice(0, STORY_MAX_CHARS - 1).trimEnd()}…` : description);
+// An event without a story uses the opening of its description.
+const shortText = (text) =>
+  text.length > STORY_MAX_CHARS ? `${text.slice(0, STORY_MAX_CHARS - 1).trimEnd()}…` : text;
 
-// The home-page carousel: completed events only, most recently ended first.
+// The home-page carousel, newest first: each approved story of a completed
+// event, and completed events with none. Pending or rejected stories are not
+// joined, so they can never reach the site.
 export async function pastStories(limit = 12) {
   const rows = await query(
-    `SELECT ${PUBLIC_COLUMNS} ${PUBLIC_FROM} AND (${PHASE_SQL}) = 'completed'
-     ORDER BY e.end_date DESC, e.id DESC LIMIT $1`,
+    `SELECT e.id AS event_id, e.title_mr, e.title_en, e.description_mr, e.description_en, e.start_date, e.end_date,
+            d.name_mr AS district_name_mr, d.name_en AS district_name_en, m.url AS cover_url,
+            s.id AS story_id, s.story_mr, s.story_en, sm.url AS story_image
+       FROM events e
+       JOIN districts d ON d.id = e.district_id
+       LEFT JOIN media_assets m ON m.id = e.cover_media_id AND m.deleted_at IS NULL
+       LEFT JOIN success_stories s ON s.event_id = e.id AND s.deleted_at IS NULL
+         AND s.status = 'published' AND s.approval_status = 'approved'
+       LEFT JOIN media_assets sm ON sm.id = (s.image->>'media_id')::int AND sm.deleted_at IS NULL
+      WHERE ${PUBLIC_WHERE} AND (${PHASE_SQL}) = 'completed'
+      ORDER BY e.end_date DESC, e.id DESC, s.id DESC LIMIT $1`,
     [limit]
   );
   return rows.map((e) => ({
-    id: e.id, title_mr: e.title_mr, title_en: e.title_en,
-    story_mr: storyText(e.story_mr, e.description_mr), story_en: storyText(e.story_en, e.description_en),
+    id: e.story_id ? `story-${e.story_id}` : `event-${e.event_id}`,
+    event_id: e.event_id, title_mr: e.title_mr, title_en: e.title_en,
+    story_mr: e.story_mr || shortText(e.description_mr), story_en: e.story_en || shortText(e.description_en),
     district_name_mr: e.district_name_mr, district_name_en: e.district_name_en,
-    start_date: e.start_date, end_date: e.end_date, cover_url: e.cover_url,
+    start_date: e.start_date, end_date: e.end_date, cover_url: e.story_image ?? e.cover_url,
   }));
 }
 

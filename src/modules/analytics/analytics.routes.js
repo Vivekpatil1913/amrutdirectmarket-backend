@@ -46,33 +46,33 @@ router.get("/", requirePortal, asyncHandler(async (req, res) => {
            SELECT district_id, COUNT(*) AS sponsors FROM sponsors
             WHERE deleted_at IS NULL AND status = 'approved' GROUP BY district_id
          ) sp ON sp.district_id = d.id
-        WHERE d.deleted_at IS NULL AND ($1::int IS NULL OR d.id = $1)
+        WHERE d.deleted_at IS NULL AND ($1::int[] IS NULL OR d.id = ANY($1))
         ORDER BY d.name_en`,
       [scope]
     ),
     query(
       `SELECT r.status, COUNT(*)::int AS total FROM vendor_registrations r JOIN events e ON e.id = r.event_id
-        WHERE r.deleted_at IS NULL AND e.deleted_at IS NULL AND ($1::int IS NULL OR e.district_id = $1)
+        WHERE r.deleted_at IS NULL AND e.deleted_at IS NULL AND ($1::int[] IS NULL OR e.district_id = ANY($1))
         GROUP BY r.status ORDER BY r.status`,
       [scope]
     ),
     query(
       `SELECT r.caste_category, COUNT(*)::int AS total FROM vendor_registrations r JOIN events e ON e.id = r.event_id
-        WHERE r.deleted_at IS NULL AND e.deleted_at IS NULL AND ($1::int IS NULL OR e.district_id = $1)
+        WHERE r.deleted_at IS NULL AND e.deleted_at IS NULL AND ($1::int[] IS NULL OR e.district_id = ANY($1))
         GROUP BY r.caste_category ORDER BY total DESC`,
       [scope]
     ),
     query(
       `SELECT q.quota_type, SUM(q.total)::int AS total, SUM(q.total - q.available)::int AS booked
          FROM event_stall_quotas q JOIN events e ON e.id = q.event_id
-        WHERE e.deleted_at IS NULL AND e.status = 'published' AND e.approval_status = 'approved' AND ($1::int IS NULL OR e.district_id = $1)
+        WHERE e.deleted_at IS NULL AND e.status = 'published' AND e.approval_status = 'approved' AND ($1::int[] IS NULL OR e.district_id = ANY($1))
         GROUP BY q.quota_type ORDER BY q.quota_type`,
       [scope]
     ),
     query(
       `SELECT TO_CHAR(date_trunc('month', r.created_at), 'YYYY-MM') AS month, COUNT(*)::int AS total
          FROM vendor_registrations r JOIN events e ON e.id = r.event_id
-        WHERE r.deleted_at IS NULL AND e.deleted_at IS NULL AND ($1::int IS NULL OR e.district_id = $1)
+        WHERE r.deleted_at IS NULL AND e.deleted_at IS NULL AND ($1::int[] IS NULL OR e.district_id = ANY($1))
           AND r.created_at >= date_trunc('month', NOW()) - INTERVAL '11 months'
         GROUP BY 1 ORDER BY 1`,
       [scope]

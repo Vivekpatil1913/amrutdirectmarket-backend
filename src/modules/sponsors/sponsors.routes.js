@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { z } from "zod";
 import { query, queryOne } from "../../db/pool.js";
-import { districtScope, requirePortal, requireSuperadmin } from "../../middleware/auth.js";
+import { districtInScope, districtScope, requirePortal, requireSuperadmin } from "../../middleware/auth.js";
 import { AppError, asyncHandler, conflict, notFound, paginated, parseOrThrow, success, validation } from "../../lib/errors.js";
 import { cleanString, idParam, likePattern, optionalHttpUrl, optionalId, paginationQuery, requiredString } from "../../lib/validators.js";
 import { SPONSOR_STATUSES, SPONSOR_TIERS } from "../../lib/constants.js";
@@ -56,7 +56,7 @@ const SELECT = `SELECT s.*, m.url AS logo_url, d.name_en AS district_name_en, d.
 
 async function getSponsor(sponsorId, scope) {
   const row = await queryOne(
-    `${SELECT} WHERE s.id = $1 AND s.deleted_at IS NULL AND ($2::int IS NULL OR s.district_id = $2)`,
+    `${SELECT} WHERE s.id = $1 AND s.deleted_at IS NULL AND ($2::int[] IS NULL OR s.district_id = ANY($2))`,
     [sponsorId, scope]
   );
   if (!row) throw notFound("Sponsor");
@@ -66,8 +66,9 @@ async function getSponsor(sponsorId, scope) {
 // The district comes from the manager's scope; a super admin may pick one or
 // leave it empty for a statewide sponsor. A linked event must be in it.
 async function checkRefs(data, scope) {
-  const districtId = scope ?? data.district_id ?? null;
+  const districtId = districtInScope(scope, data.district_id);
   const errors = [];
+  if (scope && !districtId) errors.push({ field: "district_id", message: "Choose a district in your division" });
   if (districtId && !(await queryOne("SELECT 1 FROM districts WHERE id = $1 AND deleted_at IS NULL", [districtId]))) {
     errors.push({ field: "district_id", message: "Choose a valid district" });
   }
@@ -91,9 +92,9 @@ router.get("/", asyncHandler(async (req, res) => {
     params.push(value);
     where.push(sql.replaceAll("$?", `$${params.length}`));
   };
-  if (scope) add(scope, "s.district_id = $?");
+  if (scope) add(scope, "s.district_id = ANY($?)");
   else if (q.district === "statewide") where.push("s.district_id IS NULL");
-  else if (q.district) add(q.district, "s.district_id = $?");
+  if (q.district) add(q.district, "s.district_id = $?");
   if (q.status) add(q.status, "s.status = $?");
   if (q.search) add(likePattern(q.search), "(s.name ILIKE $? OR s.contact_name ILIKE $?)");
   const whereSql = `WHERE ${where.join(" AND ")}`;

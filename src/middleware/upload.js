@@ -21,7 +21,7 @@ export const ALLOWED_IMAGE_TYPES = {
 // Filenames are random and the extension comes from the validated MIME type,
 // never from the visitor's filename, so "shell.php.jpg" style names and path
 // tricks cannot reach the disk.
-function safeFilename(mime) {
+export function safeFilename(mime) {
   return `${Date.now()}-${crypto.randomBytes(8).toString("hex")}${ALLOWED_IMAGE_TYPES[mime] ?? BOOKING_FILE_TYPES[mime] ?? ".bin"}`;
 }
 

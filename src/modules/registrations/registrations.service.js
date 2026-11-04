@@ -226,7 +226,7 @@ export async function createByManager(body, user, scope) {
   const form = await getForm("vendor_registration");
   const { data, extra } = parseBooking(form, body, { manager: true });
   const event = await bookableEvent(data.event_id, { publicOnly: false });
-  if (scope && event.district_id !== scope) throw notFound("Event");
+  if (scope && !scope.includes(event.district_id)) throw notFound("Event");
   const label = await categoryLabels(data.product_categories);
   const row = await transaction(async (tx) => {
     const inserted = await insertApplication(tx, data, extra, {
@@ -246,8 +246,8 @@ export async function list(rawQuery, scope) {
     params.push(value);
     where.push(sql.replaceAll("$?", `$${params.length}`));
   };
-  if (scope) add(scope, "e.district_id = $?");
-  else if (q.district) add(q.district, "e.district_id = $?");
+  if (scope) add(scope, "e.district_id = ANY($?)");
+  if (q.district) add(q.district, "e.district_id = $?");
   if (q.event) add(q.event, "r.event_id = $?");
   if (q.status) add(q.status, "r.status = $?");
   if (q.quota) add(q.quota, "r.quota_type = $?");
@@ -274,7 +274,7 @@ export async function getById(id, scope, { includeDeleted = false } = {}) {
               WHERE w.event_id = r.event_id AND w.quota_type = r.quota_type AND w.status = 'waitlisted'
                 AND w.deleted_at IS NULL AND (w.created_at, w.id) <= (r.created_at, r.id))::int AS waitlist_position
        ${FROM} LEFT JOIN admin_users u ON u.id = r.reviewed_by
-      WHERE r.id = $1 ${includeDeleted ? "" : "AND r.deleted_at IS NULL"} AND ($2::int IS NULL OR e.district_id = $2)`,
+      WHERE r.id = $1 ${includeDeleted ? "" : "AND r.deleted_at IS NULL"} AND ($2::int[] IS NULL OR e.district_id = ANY($2))`,
     [id, scope]
   );
   if (!row) throw notFound("Application");
@@ -353,7 +353,7 @@ export async function revealAadhaar(id, user) {
 export async function getFile(id, key, user, scope) {
   const row = await queryOne(
     `SELECT r.reference_no, r.files -> $2 AS file ${FROM}
-      WHERE r.id = $1 AND r.deleted_at IS NULL AND ($3::int IS NULL OR e.district_id = $3)`,
+      WHERE r.id = $1 AND r.deleted_at IS NULL AND ($3::int[] IS NULL OR e.district_id = ANY($3))`,
     [id, key, scope]
   );
   if (!row) throw notFound("Application");

@@ -16,7 +16,8 @@ export async function attachUser(req, _res, next) {
 
     const payload = jwt.verify(token, env.jwt.secret);
     const session = await queryOne(
-      `SELECT s.id, s.expires_at, u.id AS user_id, u.email, u.name, u.role, u.avatar_url, u.district_id
+      `SELECT s.id, s.expires_at, u.id AS user_id, u.email, u.name, u.role, u.avatar_url, u.district_id, u.division,
+              (SELECT array_agg(d.id) FROM districts d WHERE d.division = u.division AND d.deleted_at IS NULL) AS division_district_ids
          FROM admin_sessions s
          JOIN admin_users u ON u.id = s.user_id
         WHERE s.id = $1 AND s.revoked_at IS NULL
@@ -39,6 +40,9 @@ export async function attachUser(req, _res, next) {
       role: session.role,
       avatarUrl: session.avatar_url,
       districtId: session.district_id,
+      division: session.division,
+      divisionDistrictIds: session.division_district_ids ?? [],
+      ip: req.ip, // recorded in the audit trail
     };
   } catch {
     // Invalid / expired token — continue unauthenticated.
@@ -51,8 +55,8 @@ export const requireAuth = asyncHandler(async (req, _res, next) => {
   next();
 });
 
-// CMS role hierarchy: superadmin > admin > editor. A district_manager is
-// outside it (rank 0): no website CMS access, only the district portal.
+// CMS role hierarchy: superadmin > admin > editor. District and divisional
+// managers are outside it (rank 0): no website CMS, only the portal.
 const RANK = { editor: 1, admin: 2, superadmin: 3 };
 
 export function requireRole(minRole) {
@@ -68,16 +72,36 @@ export const requireEditor = requireRole("editor");
 export const requireAdmin = requireRole("admin");
 export const requireSuperadmin = requireRole("superadmin");
 
-// Thet Bajar Peth portal: district managers (their own district) and super
-// admins (every district).
+// Thet Bajar Peth portal: district managers (their own district), divisional
+// managers (their division's districts) and super admins (every district).
+const PORTAL_ROLES = ["district_manager", "divisional_manager", "superadmin"];
+
 export const requirePortal = asyncHandler(async (req, _res, next) => {
   if (!req.user) throw unauthorized();
-  if (req.user.role !== "district_manager" && req.user.role !== "superadmin") throw forbidden();
+  if (!PORTAL_ROLES.includes(req.user.role)) throw forbidden();
   next();
 });
 
-// The district a portal request is confined to: the manager's own, or null
-// (all districts) for a super admin.
+// Who may approve events and success stories, and publish without approval.
+export const canModerate = (user) => user?.role === "superadmin" || user?.role === "divisional_manager";
+
+export const requireModerator = asyncHandler(async (req, _res, next) => {
+  if (!req.user) throw unauthorized();
+  if (!canModerate(req.user)) throw forbidden();
+  next();
+});
+
+// The districts a portal request is confined to, or null (all) for a super admin.
 export function districtScope(req) {
-  return req.user?.role === "district_manager" ? req.user.districtId : null;
+  if (req.user?.role === "district_manager") return [req.user.districtId];
+  if (req.user?.role === "divisional_manager") return req.user.divisionDistrictIds;
+  return null;
+}
+
+// The district a new record belongs to: a district manager's own, or the one
+// asked for if it is in scope (null otherwise).
+export function districtInScope(scope, requested) {
+  if (!scope) return requested ?? null;
+  if (scope.length === 1) return scope[0];
+  return scope.includes(requested) ? requested : null;
 }

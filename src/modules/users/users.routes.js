@@ -5,7 +5,7 @@ import { query, queryOne } from "../../db/pool.js";
 import { requireSuperadmin } from "../../middleware/auth.js";
 import { AppError, asyncHandler, conflict, notFound, paginated, parseOrThrow, success } from "../../lib/errors.js";
 import { idParam, paginationQuery, requiredString } from "../../lib/validators.js";
-import { ROLES } from "../../lib/constants.js";
+import { DIVISIONS, ROLES } from "../../lib/constants.js";
 import { audit } from "../../lib/audit.js";
 import { passwordRule } from "../auth/auth.routes.js";
 
@@ -13,7 +13,7 @@ const router = Router();
 router.use(requireSuperadmin);
 
 const id = (req) => parseOrThrow(idParam, req.params.id);
-const COLUMNS = "id, email, name, role, district_id, is_active, last_login_at, locked_until, created_at, updated_at, deleted_at";
+const COLUMNS = "id, email, name, role, district_id, division, is_active, last_login_at, locked_until, created_at, updated_at, deleted_at";
 
 const base = {
   name: requiredString(100, "Name").refine((v) => v.length >= 2, "Name must contain at least 2 characters"),
@@ -21,16 +21,25 @@ const base = {
   role: z.enum(ROLES, { errorMap: () => ({ message: "Choose a valid role" }) }),
   is_active: z.boolean().default(true),
   district_id: z.coerce.number().int().positive().nullable().optional().default(null),
+  division: z.union([z.enum(DIVISIONS), z.literal("")]).nullable().optional().default(null),
 };
-// A district manager must be assigned exactly one district; other roles are
-// statewide, so any district sent for them is dropped.
+// A district manager must be assigned one district and a divisional manager
+// one division; other roles are statewide, so what is sent for them is dropped.
 const withDistrict = (schema) =>
   schema
     .refine((v) => v.role !== "district_manager" || v.district_id, {
       message: "Choose the district this manager runs",
       path: ["district_id"],
     })
-    .transform((v) => ({ ...v, district_id: v.role === "district_manager" ? v.district_id : null }));
+    .refine((v) => v.role !== "divisional_manager" || v.division, {
+      message: "Choose the division this manager runs",
+      path: ["division"],
+    })
+    .transform((v) => ({
+      ...v,
+      district_id: v.role === "district_manager" ? v.district_id : null,
+      division: v.role === "divisional_manager" ? v.division : null,
+    }));
 const createSchema = withDistrict(z.object({ ...base, password: passwordRule }));
 const updateSchema = withDistrict(z.object({
   ...base,
@@ -111,9 +120,9 @@ router.post("/", asyncHandler(async (req, res) => {
   await assertDistrict(data.district_id);
   const hash = await bcrypt.hash(data.password, 12);
   const row = await queryOne(
-    `INSERT INTO admin_users (email, name, password_hash, role, is_active, district_id)
-     VALUES ($1, $2, $3, $4, $5, $6) RETURNING ${COLUMNS}`,
-    [data.email, data.name, hash, data.role, data.is_active, data.district_id]
+    `INSERT INTO admin_users (email, name, password_hash, role, is_active, district_id, division)
+     VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING ${COLUMNS}`,
+    [data.email, data.name, hash, data.role, data.is_active, data.district_id, data.division]
   );
   await audit(req.user, "create", "admin_users", row.id, `Created ${row.role} ${row.email}`);
   return success(res, row, 201);
@@ -132,17 +141,17 @@ router.put("/:id", asyncHandler(async (req, res) => {
   const hash = data.password ? await bcrypt.hash(data.password, 12) : null;
   const row = await queryOne(
     `UPDATE admin_users
-        SET name = $1, email = $2, role = $3, is_active = $4, district_id = $7,
+        SET name = $1, email = $2, role = $3, is_active = $4, district_id = $7, division = $8,
             password_hash = COALESCE($5, password_hash),
             failed_attempts = CASE WHEN $5 IS NULL THEN failed_attempts ELSE 0 END,
             locked_until = CASE WHEN $5 IS NULL THEN locked_until ELSE NULL END,
             updated_at = NOW()
       WHERE id = $6 RETURNING ${COLUMNS}`,
-    [data.name, data.email, data.role, data.is_active, hash, userId, data.district_id]
+    [data.name, data.email, data.role, data.is_active, hash, userId, data.district_id, data.division]
   );
   // Disabling an account, resetting its password or changing its role or
-  // district ends its open sessions, so new permissions apply immediately.
-  if (!data.is_active || hash || existing.role !== data.role || existing.district_id !== data.district_id) {
+  // district or division ends its open sessions, so new permissions apply immediately.
+  if (!data.is_active || hash || existing.role !== data.role || existing.district_id !== data.district_id || existing.division !== data.division) {
     await query("UPDATE admin_sessions SET revoked_at = NOW() WHERE user_id = $1 AND revoked_at IS NULL", [userId]);
   }
   await audit(req.user, "update", "admin_users", userId, `Updated user ${row.email}${hash ? " (password reset)" : ""}`);

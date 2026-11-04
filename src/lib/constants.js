@@ -21,7 +21,9 @@ export const ICONS = [
 
 export const PUBLISH_STATUSES = ["published", "draft"];
 export const ENQUIRY_STATUSES = ["new", "reviewed", "actioned", "archived"];
-export const ROLES = ["superadmin", "admin", "editor", "district_manager"];
+export const ROLES = ["superadmin", "admin", "editor", "district_manager", "divisional_manager"];
+// Revenue divisions of Maharashtra; a divisional manager covers one.
+export const DIVISIONS = ["konkan", "pune", "nashik", "chh-sambhajinagar", "amravati", "nagpur"];
 
 // ── Thet Bajar Peth ──────────────────────────────────────────────────────────
 export const EVENT_STATUSES = ["draft", "published", "cancelled"];

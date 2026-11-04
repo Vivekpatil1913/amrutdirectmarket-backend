@@ -24,7 +24,7 @@ const listQuery = z.object({ event_id: z.coerce.number().int().positive() });
 
 async function scopedEvent(eventId, scope) {
   const e = await queryOne(
-    "SELECT id, title_en, title_mr FROM events WHERE id = $1 AND deleted_at IS NULL AND ($2::int IS NULL OR district_id = $2)",
+    "SELECT id, title_en, title_mr FROM events WHERE id = $1 AND deleted_at IS NULL AND ($2::int[] IS NULL OR district_id = ANY($2))",
     [eventId, scope]
   );
   if (!e) throw validation([{ field: "event_id", message: "Choose one of your events" }]);
@@ -85,7 +85,7 @@ router.delete("/:id", asyncHandler(async (req, res) => {
   const row = await queryOne(
     `UPDATE event_media em SET deleted_at = NOW()
        FROM events e
-      WHERE em.id = $1 AND em.deleted_at IS NULL AND e.id = em.event_id AND ($2::int IS NULL OR e.district_id = $2)
+      WHERE em.id = $1 AND em.deleted_at IS NULL AND e.id = em.event_id AND ($2::int[] IS NULL OR e.district_id = ANY($2))
       RETURNING em.id, em.event_id`,
     [id(req), districtScope(req)]
   );

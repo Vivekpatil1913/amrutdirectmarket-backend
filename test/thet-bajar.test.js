@@ -253,19 +253,12 @@ test("approval: a manager's event is public and bookable only after a super admi
   await call("DELETE", `/admin/events/${own.body.data.id}`);
 });
 
-test("success stories: short text, and event photos limited by type and size", async () => {
+test("event photos are limited by type and size, and a long description is cut for the carousel", async () => {
   const long = await approvedEvent({
     title_en: "Story from description", description_en: "x".repeat(150), start_date: inDays(-9), end_date: inDays(-8),
   });
-  const own = await approvedEvent({ title_en: "Own story", story_en: "A good season", start_date: inDays(-7), end_date: inDays(-6) });
   const { stories } = await home();
-  const story = (id) => stories.find((s) => s.id === id);
-  assert.equal(story(long.id).story_en.length, 100, "a long description is cut to 100 characters");
-  assert.equal(story(own.id).story_en, "A good season");
-  assert.ok(stories.findIndex((s) => s.id === own.id) < stories.findIndex((s) => s.id === long.id), "newest first");
-
-  const tooLong = await call("POST", "/admin/events", { body: eventBody({ district_id: district("nashik").id, story_en: "x".repeat(101) }) });
-  assert.equal(tooLong.status, 422);
+  assert.equal(stories.find((s) => s.event_id === long.id).story_en.length, 100, "a long description is cut to 100 characters");
 
   const media = async (mime, bytes) => (await pool.query(
     `INSERT INTO media_assets (filename, original_name, mime_type, size_bytes, url, alt_text)
@@ -282,7 +275,7 @@ test("success stories: short text, and event photos limited by type and size", a
   const ok = await withCover(await media("image/webp", 3 * 1024 * 1024));
   assert.equal(ok.status, 201, JSON.stringify(ok.body));
 
-  for (const id of [long.id, own.id, ok.body.data.id]) await call("DELETE", `/admin/events/${id}`);
+  for (const id of [long.id, ok.body.data.id]) await call("DELETE", `/admin/events/${id}`);
 });
 
 test("public home data: statistics, highlights, district event counts and the slot counter", async () => {
@@ -294,7 +287,7 @@ test("public home data: statistics, highlights, district event counts and the sl
   assert.ok(data.stats.total_visitors >= 1000000, "visitors start at a base of one million");
   assert.deepEqual(data.highlights.map((e) => e.id), [eventId], "highlights are the events running today");
   assert.deepEqual(data.events.map((e) => e.id), [eventId], "completed events are not bookable cards");
-  assert.deepEqual(data.stories.map((e) => e.id), [past.id], "stories come from completed events only");
+  assert.deepEqual(data.stories.map((e) => e.event_id), [past.id], "stories come from completed events only");
   const p = data.districts.find((d) => d.code === "pune");
   assert.equal(p.event_count, 2, "the map counts every event organised in the district");
   assert.deepEqual(p.event_ids, [], "the map's upcoming list leaves out an event already running");
@@ -598,4 +591,127 @@ test("GIS analytics: statewide for super admins, own district for managers", asy
 
 test("events with applications are cancelled, not deleted", async () => {
   assert.equal((await call("DELETE", `/admin/events/${eventId}`, { auth: pune })).status, 409);
+});
+
+// ── Moderation matrix ─────────────────────────────────────────────────────
+
+let divisional;
+const stayed = [];
+
+test("divisional manager: needs a division, and works only inside it", async () => {
+  const body = { name: "Div Pune", email: "div.pune@test.local", role: "divisional_manager", password: "Manager123" };
+  assert.equal((await call("POST", "/admin/users", { body })).status, 422, "a division is required");
+  assert.equal((await call("POST", "/admin/users", { body: { ...body, division: "pune" } })).status, 201);
+  const login = await call("POST", "/auth/login", { auth: null, body: { email: body.email, password: body.password } });
+  divisional = login.body.data.token;
+  assert.equal(login.body.data.user.division, "pune");
+
+  const own = await call("POST", "/admin/events", {
+    auth: divisional, body: eventBody({ district_id: district("kolhapur").id, start_date: inDays(30), end_date: inDays(31) }),
+  });
+  assert.equal(own.status, 201, JSON.stringify(own.body));
+  assert.equal(own.body.data.approval_status, "approved", "a divisional manager publishes without approval");
+  assert.equal(own.body.data.moderation_status, "APPROVED");
+  stayed.push(own.body.data.id);
+
+  const outside = await call("POST", "/admin/events", {
+    auth: divisional, body: eventBody({ district_id: district("nashik").id, start_date: inDays(30), end_date: inDays(31) }),
+  });
+  assert.equal(outside.status, 422, "a district outside the division is refused");
+
+  const list = (await call("GET", "/admin/events?limit=100", { auth: divisional })).body.data;
+  const division = ["pune", "satara", "sangli", "solapur", "kolhapur"].map((c) => district(c).id);
+  assert.ok(list.length > 0 && list.every((e) => division.includes(e.district_id)), "only the division's events are listed");
+  assert.equal((await call("GET", "/admin/users", { auth: divisional })).status, 403, "no CMS access");
+});
+
+test("events: a district manager's event waits; divisional managers approve only their division's", async () => {
+  const mine = await call("POST", "/admin/events", { auth: pune, body: eventBody({ start_date: inDays(40), end_date: inDays(41) }) });
+  const other = await call("POST", "/admin/events", { auth: nashik, body: eventBody({ start_date: inDays(40), end_date: inDays(41) }) });
+  assert.equal(mine.body.data.moderation_status, "PENDING_APPROVAL");
+  const eventId = mine.body.data.id;
+  const shown = async (id) => (await home()).events.some((e) => e.id === id);
+  assert.equal(await shown(eventId), false, "unapproved events stay off the site");
+
+  const review = (id, auth, body = { decision: "approved" }) => call("POST", `/admin/events/${id}/review`, { auth, body });
+  assert.equal((await review(eventId, pune)).status, 403, "a district manager cannot approve");
+  assert.equal((await review(other.body.data.id, divisional)).status, 404, "another division's event does not exist");
+  assert.equal((await review(eventId, divisional)).status, 200);
+  assert.equal(await shown(eventId), true);
+
+  const edited = await call("PUT", `/admin/events/${eventId}`, { auth: pune, body: eventBody({ title_en: "Edited", start_date: inDays(40), end_date: inDays(41) }) });
+  assert.equal(edited.body.data.moderation_status, "PENDING_APPROVAL", "a manager's edit goes back for approval");
+  assert.equal(await shown(eventId), false);
+  stayed.push(eventId, other.body.data.id);
+});
+
+test("success stories: moderated, tied to a completed event, and hidden until approved", async () => {
+  const past = await approvedEvent({ title_en: "Story fair", start_date: inDays(-5), end_date: inDays(-4) });
+  stayed.push(past.id);
+  const story = (auth, body, method = "POST", path = "/admin/success-stories") => call(method, path, { auth, body });
+  const text = "Forty sellers sold out";
+
+  assert.equal((await story(pune, { event_id: stayed[0], story_en: text })).status, 404, "an event outside the district");
+  const upcoming = (await call("GET", "/admin/events?phase=upcoming&limit=100", { auth: pune })).body.data[0];
+  assert.equal((await story(pune, { event_id: upcoming.id, story_en: text })).status, 422, "the event must be completed");
+  assert.equal((await story(pune, { event_id: past.id, story_en: "x".repeat(101) })).status, 422, "100 characters at most");
+
+  const created = await story(pune, { event_id: past.id, story_en: text });
+  assert.equal(created.status, 201, JSON.stringify(created.body));
+  const row = created.body.data;
+  assert.equal(row.moderation_status, "PENDING_APPROVAL");
+  assert.equal(row.district_id, past.district_id);
+  const publicText = async () => (await home()).stories.find((s) => s.event_id === past.id)?.story_en;
+  assert.notEqual(await publicText(), text, "a pending story is not public");
+
+  const path = `/admin/success-stories/${row.id}`;
+  assert.equal((await call("GET", path, { auth: nashik })).status, 404, "another district's story does not exist");
+  assert.equal((await story(pune, { decision: "approved" }, "POST", `${path}/review`)).status, 403);
+  assert.equal((await story(divisional, { decision: "rejected" }, "POST", `${path}/review`)).status, 422, "rejecting needs a reason");
+  assert.equal((await story(divisional, { decision: "rejected", note: "Unclear" }, "POST", `${path}/review`)).body.data.moderation_status, "REJECTED");
+  assert.notEqual(await publicText(), text, "a rejected story is not public");
+
+  assert.equal((await story(divisional, { decision: "approved" }, "POST", `${path}/review`)).status, 200);
+  assert.equal(await publicText(), text, "an approved story is public");
+
+  const edited = await story(pune, { event_id: past.id, story_en: "Changed text" }, "PUT", path);
+  assert.equal(edited.body.data.moderation_status, "PENDING_APPROVAL", "a manager's edit goes back for approval");
+  assert.notEqual(await publicText(), "Changed text");
+
+  const { rows: [log] } = await pool.query(
+    `SELECT user_id, user_role, ip_address, created_at FROM activity_logs
+      WHERE entity = 'success_stories' AND entity_id = $1 AND action = 'status' ORDER BY id DESC LIMIT 1`,
+    [String(row.id)]
+  );
+  assert.equal(log.user_role, "divisional_manager");
+  assert.ok(log.user_id > 0 && log.ip_address && log.created_at, "the audit row says who, from where and when");
+  const { rows: [edit] } = await pool.query(
+    "SELECT user_role, ip_address FROM activity_logs WHERE entity = 'success_stories' AND entity_id = $1 AND action = 'update'",
+    [String(row.id)]
+  );
+  assert.equal(edit.user_role, "district_manager");
+  assert.ok(edit.ip_address);
+});
+
+test("success stories: photos are stored as WebP, and other types and large files are refused", async () => {
+  const { default: sharp } = await import("sharp");
+  const upload = (buffer, type) => {
+    const form = new FormData();
+    form.append("file", new Blob([buffer], { type }), "photo");
+    return fetch(`${base}/admin/success-stories/upload`, { method: "POST", headers: { Authorization: `Bearer ${pune}` }, body: form });
+  };
+  const png = await sharp({ create: { width: 2000, height: 1000, channels: 3, background: "#c60" } }).png().toBuffer();
+  const res = await upload(png, "image/png");
+  assert.equal(res.status, 201);
+  const { data } = await res.json();
+  assert.match(data.url, /\.webp$/);
+  const { rows: [media] } = await pool.query("SELECT mime_type, filename FROM media_assets WHERE id = $1", [data.media_id]);
+  assert.equal(media.mime_type, "image/webp");
+  const { env } = await import("../src/config/env.js");
+  const meta = await sharp(`${env.upload.dir}/media/${media.filename}`).metadata();
+  assert.equal(meta.format, "webp");
+  assert.equal(meta.width, 1600, "large photos are scaled down");
+
+  assert.equal((await upload(Buffer.concat([png, Buffer.alloc(3 * 1024 * 1024)]), "image/png")).status, 422, "over 3 MB");
+  assert.equal((await upload(await sharp(png).gif().toBuffer(), "image/gif")).status, 422, "GIF is refused");
 });

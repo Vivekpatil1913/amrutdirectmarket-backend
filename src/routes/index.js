@@ -5,7 +5,7 @@ import { requireEditor, requirePortal } from "../middleware/auth.js";
 import { env } from "../config/env.js";
 import {
   CASTE_CATEGORIES, ENQUIRY_STATUSES, EVENT_APPROVAL_STATUSES, EVENT_STATUSES, EWS_ELIGIBLE_CASTES, FORM_FIELD_TYPES, ICONS, QUOTA_TYPES,
-  REGISTRATION_STATUSES, ROLES, SECTION_TARGETS, SPONSOR_STATUSES, SPONSOR_TIERS,
+  DIVISIONS, REGISTRATION_STATUSES, ROLES, SECTION_TARGETS, SPONSOR_STATUSES, SPONSOR_TIERS,
 } from "../lib/constants.js";
 import authRoutes from "../modules/auth/auth.routes.js";
 import sectionRoutes from "../modules/sections/sections.routes.js";
@@ -23,6 +23,7 @@ import { adminRegistrations, publicRegistrations } from "../modules/registration
 import sponsorRoutes from "../modules/sponsors/sponsors.routes.js";
 import eventMediaRoutes from "../modules/event-media/eventMedia.routes.js";
 import analyticsRoutes from "../modules/analytics/analytics.routes.js";
+import storyRoutes from "../modules/success-stories/stories.routes.js";
 import { adminForms, publicForms } from "../modules/forms/forms.routes.js";
 
 const startedAt = Date.now();
@@ -56,6 +57,7 @@ export function buildRouter() {
       icons: ICONS,
       sectionTargets: SECTION_TARGETS,
       roles: ROLES,
+      divisions: DIVISIONS,
       enquiryStatuses: ENQUIRY_STATUSES,
       uploadMaxMb: env.upload.maxMb,
       sections: SECTIONS,
@@ -95,6 +97,7 @@ export function buildRouter() {
   router.use("/admin/registrations", adminRegistrations);
   router.use("/admin/sponsors", sponsorRoutes);
   router.use("/admin/event-media", eventMediaRoutes);
+  router.use("/admin/success-stories", storyRoutes);
   router.use("/admin/analytics", analyticsRoutes);
   router.use("/admin/forms", adminForms);
 

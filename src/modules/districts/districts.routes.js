@@ -20,7 +20,7 @@ const districtSchema = z.object({
 
 export async function listDistricts({ activeOnly = false } = {}) {
   return query(
-    `SELECT id, code, name_mr, name_en, lat::float AS lat, lng::float AS lng, is_active
+    `SELECT id, code, name_mr, name_en, division, lat::float AS lat, lng::float AS lng, is_active
        FROM districts WHERE deleted_at IS NULL ${activeOnly ? "AND is_active = TRUE" : ""}
       ORDER BY name_en ASC`
   );

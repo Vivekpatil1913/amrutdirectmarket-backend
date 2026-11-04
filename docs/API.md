@@ -182,4 +182,16 @@ Payload: `event_id`, `name`, `business_name`, `nature_of_business` (an option va
 | GET | `/admin/analytics` | GIS report: per-district events, stalls, applicants, sponsors with lat/lng, plus totals, status / caste / quota splits and a 12-month trend. |
 | GET/PUT | `/admin/forms/vendor_registration` | Super admin form builder: `{ title, fields: [{ key, label_mr, label_en, type, required, enabled, placeholder, options, max }] }`. Types: `text`, `email`, `phone`, `number`, `pan`, `date`, `textarea`, `select` (dropdown), `radio`, `checkbox` (a group with options, a single tick box without), `file`, `password` (stored as a bcrypt hash), `url` (link). System fields (`name`, `business_name`, `nature_of_business`, `product_categories`, `aadhaar`, `caste_category`, `caste_name`, `caste_certificate`, `phone`, `email`, `udyam_number`) are always kept and keep their type; the first eight are always mandatory, the last three can be made optional or hidden. |
 
-The landing carousel comes from completed events: `stories` in `/public/thet-bajar` lists them newest first with `story_*` (at most 100 characters; the event's `story_mr`/`story_en`, else the opening of its description), district and cover. A new event cover must be JPG, PNG or WebP and at most 3 MB. Collections support `image` fields.
+The landing carousel comes from completed events: `stories` in `/public/thet-bajar` lists each approved success story of a completed event, and completed events with none (using the opening of their description), newest first.
+
+Moderation. `district_manager` is confined to one district and `divisional_manager` to one division (`districts.division`; `konkan`, `pune`, `nashik`, `chh-sambhajinagar`, `amravati`, `nagpur`). A district manager's events and stories wait for approval, as does any edit; divisional managers and super admins approve within their scope with `POST .../:id/review`, and what they create is approved at once. Rows expose `moderation_status` (`PENDING_APPROVAL`, `APPROVED`, `REJECTED`).
+
+| Method | Path | Notes |
+|---|---|---|
+| GET/POST | `/admin/success-stories` | `?approval=`. Body: `{ event_id, story_mr, story_en, image_media_id }`; the event must be completed, stories at most 100 characters. |
+| GET/PUT/DELETE | `/admin/success-stories/:id` | A manager's `PUT` sends the story back for approval. |
+| POST | `/admin/success-stories/:id/review` | Divisional manager or super admin: `{ decision: approved\|rejected, note }`. |
+| POST | `/admin/success-stories/upload` | Multipart `file`: JPG, PNG or WebP up to 3 MB, stored as WebP at most 1600 px wide. |
+
+Each `activity_logs` row records `user_id`, `user_role`, `ip_address` and `created_at`.
+ A new event cover must be JPG, PNG or WebP and at most 3 MB. Collections support `image` fields.
