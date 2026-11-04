@@ -8,7 +8,7 @@ export async function liveMedia(ids) {
   const unique = [...new Set(ids.filter((id) => Number.isInteger(id) && id > 0))];
   if (!unique.length) return new Map();
   const rows = await query(
-    "SELECT id, url, alt_text FROM media_assets WHERE id = ANY($1::int[]) AND deleted_at IS NULL",
+    "SELECT id, url, alt_text, mime_type, size_bytes FROM media_assets WHERE id = ANY($1::int[]) AND deleted_at IS NULL",
     [unique]
   );
   return new Map(rows.map((r) => [r.id, r]));

@@ -12,6 +12,7 @@ import { SECTION_KEYS } from "../sections/sections.config.js";
 import * as events from "../events/events.service.js";
 import { listDistricts } from "../districts/districts.routes.js";
 import { publicSponsors } from "../sponsors/sponsors.routes.js";
+import { ttlCached } from "../../lib/ttlCache.js";
 
 const router = Router();
 
@@ -58,6 +59,11 @@ async function homeStats() {
   );
 }
 
+// The counters change slowly and every home-page visit reads them, so they are
+// kept for five minutes. A new visit still gets the live total from POST /visits.
+const STATS_TTL_MS = 5 * 60 * 1000;
+const cachedHomeStats = ttlCached(homeStats, env.isTest ? 0 : STATS_TTL_MS);
+
 // Events organised per district (every approved event that was not
 // cancelled, past or upcoming): the map's pointers show this count.
 async function eventCountsByDistrict() {
@@ -68,12 +74,14 @@ async function eventCountsByDistrict() {
   return new Map(rows.map((r) => [r.district_id, r.n]));
 }
 
-// The home page's live data: statistics, the latest events' highlights, live
+// The home page's live data: statistics, completed events' stories, the latest
+// events' highlights, live
 // and upcoming events with their stall availability, districts for the map
 // and approved sponsors.
 router.get("/thet-bajar", asyncHandler(async (_req, res) => {
-  const [stats, highlights, upcoming, districts, counts, sponsors] = await Promise.all([
-    homeStats(),
+  const [stats, stories, highlights, upcoming, districts, counts, sponsors] = await Promise.all([
+    cachedHomeStats(),
+    events.pastStories(),
     events.latestHighlights(2),
     events.listPublic({ limit: 24 }),
     listDistricts({ activeOnly: true }),
@@ -85,6 +93,7 @@ router.get("/thet-bajar", asyncHandler(async (_req, res) => {
   res.set("Cache-Control", "no-cache");
   return success(res, {
     stats: { ...stats, total_visitors: Number(stats.total_visitors ?? 0) },
+    stories,
     highlights,
     events: upcoming,
     districts: districts.map((d) => ({ ...d, event_ids: byDistrict.get(d.id) ?? [], event_count: counts.get(d.id) ?? 0 })),

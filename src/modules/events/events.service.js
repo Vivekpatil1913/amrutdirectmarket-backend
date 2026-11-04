@@ -4,7 +4,9 @@ import { conflict, forbidden, notFound, parseOrThrow, validation } from "../../l
 import {
   cleanString, httpUrl, isoDate, likePattern, mobileNumber, optionalId, paginationQuery, requiredString,
 } from "../../lib/validators.js";
-import { EVENT_APPROVAL_STATUSES, EVENT_STATUSES, QUOTA_TYPES } from "../../lib/constants.js";
+import {
+  COVER_IMAGE_MAX_MB, COVER_IMAGE_TYPES, EVENT_APPROVAL_STATUSES, EVENT_STATUSES, QUOTA_TYPES, STORY_MAX_CHARS,
+} from "../../lib/constants.js";
 import { audit } from "../../lib/audit.js";
 import { liveMedia } from "../../lib/media.js";
 import { setQuotaTotal } from "../registrations/slots.js";
@@ -32,6 +34,8 @@ export const eventSchema = z
     title_en: cleanString(160).default(""),
     description_mr: cleanString(2000).default(""),
     description_en: cleanString(2000).default(""),
+    story_mr: cleanString(STORY_MAX_CHARS).default(""),
+    story_en: cleanString(STORY_MAX_CHARS).default(""),
     venue_mr: requiredString(200, "Event venue"),
     venue_en: cleanString(200).default(""),
     city_mr: cleanString(100).default(""),
@@ -136,13 +140,25 @@ async function resolveDistrict(data, scope) {
   return districtId;
 }
 
-async function assertImages(data) {
+// A new cover must suit the success-story carousel. Covers already saved are
+// left alone, so older events stay editable.
+function coverError(cover) {
+  if (!COVER_IMAGE_TYPES.includes(cover.mime_type)) return "Event photo must be a JPG, PNG or WebP image";
+  if (Number(cover.size_bytes) > COVER_IMAGE_MAX_MB * 1024 * 1024) return `Event photo can be at most ${COVER_IMAGE_MAX_MB} MB`;
+  return "";
+}
+
+async function assertImages(data, before) {
   const ids = [data.cover_media_id, data.sponsor_logo_media_id].filter(Boolean);
   if (!ids.length) return;
   const live = await liveMedia(ids);
   const errors = ["cover_media_id", "sponsor_logo_media_id"]
     .filter((k) => data[k] && !live.has(data[k]))
     .map((field) => ({ field, message: "Selected image no longer exists" }));
+  const cover = live.get(data.cover_media_id);
+  if (cover && data.cover_media_id !== before?.cover_media_id && coverError(cover)) {
+    errors.push({ field: "cover_media_id", message: coverError(cover) });
+  }
   if (errors.length) throw validation(errors);
 }
 
@@ -150,6 +166,7 @@ const columnValues = (data) => [
   data.title_mr, data.title_en, data.description_mr, data.description_en, data.venue_mr, data.venue_en,
   data.city_mr, data.city_en, data.start_date, data.end_date, data.event_time, data.venue_map_link, data.contact_phone,
   data.sponsor_name, data.sponsor_logo_media_id, data.status, data.registration_open, data.cover_media_id,
+  data.story_mr, data.story_en,
 ];
 
 async function applyQuotas(tx, eventId, quotas) {
@@ -175,9 +192,10 @@ export async function create(body, user, scope) {
       `INSERT INTO events (district_id, title_mr, title_en, description_mr, description_en, venue_mr, venue_en,
                            city_mr, city_en, start_date, end_date, event_time, venue_map_link, contact_phone,
                            sponsor_name, sponsor_logo_media_id, status, registration_open, cover_media_id,
+                           story_mr, story_en,
                            approval_status, submitted_at, reviewed_by, reviewed_at, created_by, updated_by)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19,
-               $20, NOW(), $21, $22, $23, $23) RETURNING id`,
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21,
+               $22, NOW(), $23, $24, $25, $25) RETURNING id`,
       [districtId, ...columnValues(data), approved ? "approved" : "pending", approved ? user.id : null,
         approved ? new Date() : null, user.id]
     );
@@ -194,7 +212,7 @@ export async function update(id, body, user, scope) {
   const data = parseOrThrow(eventSchema, body ?? {});
   // Only a super admin may move an event to another district.
   const districtId = scope ? before.district_id : await resolveDistrict({ district_id: data.district_id ?? before.district_id }, null);
-  await assertImages(data);
+  await assertImages(data, before);
   // A manager's change goes back to the approval queue (the event leaves the
   // public site until it is approved again); bookings already made stay.
   const resubmit = Boolean(scope);
@@ -203,11 +221,12 @@ export async function update(id, body, user, scope) {
       `UPDATE events SET district_id = $1, title_mr = $2, title_en = $3, description_mr = $4, description_en = $5,
               venue_mr = $6, venue_en = $7, city_mr = $8, city_en = $9, start_date = $10, end_date = $11, event_time = $12,
               venue_map_link = $13, contact_phone = $14, sponsor_name = $15, sponsor_logo_media_id = $16, status = $17,
-              registration_open = $18, cover_media_id = $19, updated_by = $20, updated_at = NOW(),
-              approval_status = CASE WHEN $21 THEN 'pending' ELSE approval_status END,
-              submitted_at = CASE WHEN $21 THEN NOW() ELSE submitted_at END,
-              review_note = CASE WHEN $21 THEN '' ELSE review_note END
-        WHERE id = $22 AND deleted_at IS NULL`,
+              registration_open = $18, cover_media_id = $19, story_mr = $20, story_en = $21,
+              updated_by = $22, updated_at = NOW(),
+              approval_status = CASE WHEN $23 THEN 'pending' ELSE approval_status END,
+              submitted_at = CASE WHEN $23 THEN NOW() ELSE submitted_at END,
+              review_note = CASE WHEN $23 THEN '' ELSE review_note END
+        WHERE id = $24 AND deleted_at IS NULL`,
       [districtId, ...columnValues(data), user.id, resubmit, id]
     );
     await applyQuotas(tx, id, data.quotas);
@@ -253,6 +272,7 @@ export async function restore(id, user, scope) {
 // ── Public ────────────────────────────────────────────────────────────────
 
 const PUBLIC_COLUMNS = `e.id, e.district_id, e.title_mr, e.title_en, e.description_mr, e.description_en,
+  e.story_mr, e.story_en,
   e.venue_mr, e.venue_en, e.city_mr, e.city_en, e.start_date, e.end_date, e.event_time, e.venue_map_link,
   e.contact_phone, e.sponsor_name, e.registration_open, ${PHASE_SQL} AS phase, ${QUOTAS_SQL} AS quotas,
   d.code AS district_code, d.name_mr AS district_name_mr, d.name_en AS district_name_en,
@@ -297,6 +317,26 @@ export async function latestHighlights(limit = 2) {
     [limit - started.length]
   );
   return [...started, ...upcoming].map((e) => ({ ...e, bookable: bookable(e) }));
+}
+
+// A story is at most STORY_MAX_CHARS; an event without one uses the opening
+// of its description.
+const storyText = (story, description) =>
+  story || (description.length > STORY_MAX_CHARS ? `${description.slice(0, STORY_MAX_CHARS - 1).trimEnd()}…` : description);
+
+// The home-page carousel: completed events only, most recently ended first.
+export async function pastStories(limit = 12) {
+  const rows = await query(
+    `SELECT ${PUBLIC_COLUMNS} ${PUBLIC_FROM} AND (${PHASE_SQL}) = 'completed'
+     ORDER BY e.end_date DESC, e.id DESC LIMIT $1`,
+    [limit]
+  );
+  return rows.map((e) => ({
+    id: e.id, title_mr: e.title_mr, title_en: e.title_en,
+    story_mr: storyText(e.story_mr, e.description_mr), story_en: storyText(e.story_en, e.description_en),
+    district_name_mr: e.district_name_mr, district_name_en: e.district_name_en,
+    start_date: e.start_date, end_date: e.end_date, cover_url: e.cover_url,
+  }));
 }
 
 export async function getPublic(id) {

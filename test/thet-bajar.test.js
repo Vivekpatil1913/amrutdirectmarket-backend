@@ -253,6 +253,38 @@ test("approval: a manager's event is public and bookable only after a super admi
   await call("DELETE", `/admin/events/${own.body.data.id}`);
 });
 
+test("success stories: short text, and event photos limited by type and size", async () => {
+  const long = await approvedEvent({
+    title_en: "Story from description", description_en: "x".repeat(150), start_date: inDays(-9), end_date: inDays(-8),
+  });
+  const own = await approvedEvent({ title_en: "Own story", story_en: "A good season", start_date: inDays(-7), end_date: inDays(-6) });
+  const { stories } = await home();
+  const story = (id) => stories.find((s) => s.id === id);
+  assert.equal(story(long.id).story_en.length, 100, "a long description is cut to 100 characters");
+  assert.equal(story(own.id).story_en, "A good season");
+  assert.ok(stories.findIndex((s) => s.id === own.id) < stories.findIndex((s) => s.id === long.id), "newest first");
+
+  const tooLong = await call("POST", "/admin/events", { body: eventBody({ district_id: district("nashik").id, story_en: "x".repeat(101) }) });
+  assert.equal(tooLong.status, 422);
+
+  const media = async (mime, bytes) => (await pool.query(
+    `INSERT INTO media_assets (filename, original_name, mime_type, size_bytes, url, alt_text)
+     VALUES ($1, 'cover', $2, $3, $4, '') RETURNING id`,
+    [`cover-${mime.replace("/", "-")}-${bytes}`, mime, bytes, `/uploads/media/cover-${bytes}`]
+  )).rows[0].id;
+  const withCover = async (id) => call("POST", "/admin/events", { body: eventBody({ district_id: district("nashik").id, cover_media_id: id }) });
+  const big = await withCover(await media("image/webp", 3 * 1024 * 1024 + 1));
+  assert.equal(big.status, 422);
+  assert.match(JSON.stringify(big.body), /at most 3 MB/);
+  const gif = await withCover(await media("image/gif", 1000));
+  assert.equal(gif.status, 422);
+  assert.match(JSON.stringify(gif.body), /JPG, PNG or WebP/);
+  const ok = await withCover(await media("image/webp", 3 * 1024 * 1024));
+  assert.equal(ok.status, 201, JSON.stringify(ok.body));
+
+  for (const id of [long.id, own.id, ok.body.data.id]) await call("DELETE", `/admin/events/${id}`);
+});
+
 test("public home data: statistics, highlights, district event counts and the slot counter", async () => {
   const past = await approvedEvent({ title_en: "Pune Diwali Bajar", start_date: inDays(-20), end_date: inDays(-18) });
   const data = await home();
@@ -262,6 +294,7 @@ test("public home data: statistics, highlights, district event counts and the sl
   assert.ok(data.stats.total_visitors >= 1000000, "visitors start at a base of one million");
   assert.deepEqual(data.highlights.map((e) => e.id), [eventId, past.id], "latest two events, newest first");
   assert.deepEqual(data.events.map((e) => e.id), [eventId], "completed events are not bookable cards");
+  assert.deepEqual(data.stories.map((e) => e.id), [past.id], "stories come from completed events only");
   const p = data.districts.find((d) => d.code === "pune");
   assert.equal(p.event_count, 2, "the map counts every event organised in the district");
   assert.deepEqual(p.event_ids, [eventId]);

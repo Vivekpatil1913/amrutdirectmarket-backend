@@ -47,3 +47,8 @@ export const FORM_FIELD_TYPES = [
 ];
 // Uploads accepted by file fields of the public booking form.
 export const BOOKING_FILE_TYPES = { "application/pdf": ".pdf", "image/jpeg": ".jpg", "image/png": ".png" };
+// An event's cover doubles as its success-story photo.
+export const COVER_IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp"];
+export const COVER_IMAGE_MAX_MB = 3;
+// Length of the story shown on the home-page carousel.
+export const STORY_MAX_CHARS = 100;
