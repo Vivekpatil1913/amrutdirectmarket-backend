@@ -50,8 +50,8 @@ export const env = {
   },
 
   auth: {
-    maxAttempts: int("LOGIN_MAX_ATTEMPTS", 5),
-    lockMinutes: int("LOGIN_LOCK_MINUTES", 15),
+    maxAttempts: int("LOGIN_MAX_ATTEMPTS", 15),
+    lockMinutes: int("LOGIN_LOCK_MINUTES", 1540),
     cookieName: "ap_admin_session",
   },
 
