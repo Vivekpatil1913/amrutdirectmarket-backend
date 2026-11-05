@@ -21,6 +21,12 @@ if (isProd && jwtSecret.length < 32) {
   throw new Error("JWT_SECRET must be set to at least 32 characters in production");
 }
 
+// Key for encrypting Aadhaar numbers at rest (64 hex chars = 32 bytes).
+const aadhaarKey = optional("AADHAAR_ENC_KEY", "");
+if (isProd && !/^[0-9a-f]{64}$/i.test(aadhaarKey)) {
+  throw new Error("AADHAAR_ENC_KEY must be 64 hex characters in production");
+}
+
 const uploadDir = optional("UPLOAD_DIR", "uploads");
 
 export const env = {
@@ -44,8 +50,8 @@ export const env = {
   },
 
   auth: {
-    maxAttempts: int("LOGIN_MAX_ATTEMPTS", 5),
-    lockMinutes: int("LOGIN_LOCK_MINUTES", 15),
+    maxAttempts: int("LOGIN_MAX_ATTEMPTS", 15),
+    lockMinutes: int("LOGIN_LOCK_MINUTES", 1540),
     cookieName: "ap_admin_session",
   },
 
@@ -56,6 +62,13 @@ export const env = {
       .map((o) => o.trim())
       .filter(Boolean),
   },
+
+  identity: {
+    // Outside production a key is derived from JWT_SECRET so a fresh checkout
+    // works; production refuses to start without a real one (above).
+    aadhaarKey,
+  },
+
 
   upload: {
     dir: isAbsolute(uploadDir) ? uploadDir : resolve(ROOT_DIR, uploadDir),

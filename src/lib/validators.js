@@ -61,3 +61,20 @@ export const paginationQuery = {
   trash: z.enum(["true", "false"]).optional().default("false"),
   order: z.enum(["asc", "desc"]).optional(),
 };
+
+// ILIKE pattern matching `value` anywhere, with LIKE wildcards escaped.
+export const likePattern = (value) => `%${String(value).replace(/[\%_]/g, (m) => `\${m}`)}%`;
+
+export const isoDate = (label) =>
+  z
+    .string({ required_error: `${label} is required` })
+    .regex(/^\d{4}-\d{2}-\d{2}$/, `${label} must be a date (YYYY-MM-DD)`)
+    .refine((v) => !Number.isNaN(Date.parse(`${v}T00:00:00Z`)), `${label} must be a valid date`);
+
+export const optionalId = z.coerce.number().int().positive().nullable().optional().default(null);
+
+// Indian 10-digit mobile number; spaces and hyphens are ignored.
+export const mobileNumber = z
+  .string({ required_error: "Mobile number is required" })
+  .transform((v) => v.replace(/[\s-]/g, "").replace(/^\+91/, ""))
+  .refine((v) => /^[6-9]\d{9}$/.test(v), "Enter a valid 10-digit mobile number");

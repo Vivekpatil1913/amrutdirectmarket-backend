@@ -3,10 +3,11 @@ import path from "path";
 import { env } from "./config/env.js";
 import { checkConnection, pool } from "./db/pool.js";
 import { createApp } from "./app.js";
-import { MEDIA_SUBDIR } from "./middleware/upload.js";
+import { BOOKING_SUBDIR, MEDIA_SUBDIR } from "./middleware/upload.js";
 import { logger } from "./lib/logger.js";
 
 mkdirSync(path.join(env.upload.dir, MEDIA_SUBDIR), { recursive: true });
+mkdirSync(path.join(env.upload.dir, BOOKING_SUBDIR), { recursive: true });
 
 async function main() {
   await checkConnection();

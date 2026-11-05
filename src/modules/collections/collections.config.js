@@ -79,28 +79,6 @@ export const COLLECTIONS = {
     search: ["title_mr", "title_en", "desc_mr", "desc_en"],
     filters: [],
   },
-  "eligibility-groups": {
-    table: "eligibility_groups",
-    entity: "Eligibility group",
-    publicKey: "eligibilityGroups",
-    titleField: "name_en",
-    fields: [{ key: "name", label: "Name", type: "text", bi: true, required: true, max: 80 }],
-    search: ["name_mr", "name_en"],
-    filters: [],
-  },
-  "participation-steps": {
-    table: "participation_steps",
-    entity: "Participation step",
-    publicKey: "participationSteps",
-    titleField: "title_en",
-    fields: [
-      { key: "title", label: "Title", type: "text", bi: true, required: true, max: 120 },
-      { key: "desc", label: "Description", type: "textarea", bi: true, max: 400 },
-      { key: "icon", label: "Icon", type: "select", options: iconOptions, default: "send" },
-    ],
-    search: ["title_mr", "title_en", "desc_mr", "desc_en"],
-    filters: [],
-  },
   "enquiry-subjects": {
     table: "enquiry_subjects",
     entity: "Enquiry subject",
