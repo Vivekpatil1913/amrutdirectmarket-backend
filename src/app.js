@@ -15,7 +15,9 @@ import { AppError } from "./lib/errors.js";
 export function createApp() {
   const app = express();
 
-  app.set("trust proxy", 1);
+  // Every rate limit is counted per client address, so req.ip must be the
+  // visitor's, not nginx's or the load balancer's (see env.http.trustProxy).
+  app.set("trust proxy", env.http.trustProxy);
   app.disable("x-powered-by");
 
   app.use(requestLog);
@@ -54,18 +56,22 @@ export function createApp() {
     })
   );
 
+  app.use(attachUser);
   app.use(
     "/api",
     rateLimit({
       windowMs: 15 * 60 * 1000,
-      max: env.isTest ? 100000 : 1000,
+      limit: env.isTest ? 100000 : env.http.rateLimit,
       standardHeaders: true,
       legacyHeaders: false,
+      // Signing in has its own guard, which counts wrong passwords only.
+      skip: (req) => req.method === "POST" && req.path === "/v1/auth/login",
+      // Signed-in staff each get their own budget, so colleagues behind one
+      // office connection never share one (nor with the public site's traffic).
+      keyGenerator: (req) => (req.user ? `user:${req.user.id}` : `ip:${req.ip}`),
       message: { error: { code: "RATE_LIMITED", message: "Too many requests. Please slow down." } },
     })
   );
-
-  app.use(attachUser);
   app.use("/api/v1", buildRouter());
 
   app.use(notFoundHandler);

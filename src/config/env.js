@@ -13,6 +13,14 @@ function int(name, fallback) {
   return Number.isFinite(value) ? value : fallback;
 }
 
+// Express "trust proxy": a hop count, true/false, or a list of addresses,
+// subnets and names (loopback, linklocal, uniquelocal).
+function trustProxy(value) {
+  if (/^\d+$/.test(value)) return Number(value);
+  if (value === "true" || value === "false") return value === "true";
+  return value;
+}
+
 const nodeEnv = optional("NODE_ENV", "development");
 const isProd = nodeEnv === "production";
 
@@ -49,10 +57,24 @@ export const env = {
     sessionHours: int("SESSION_HOURS", 8),
   },
 
+  // Sign-in protection counts wrong passwords only; a correct password is never
+  // counted. See src/modules/auth/loginGuard.js.
   auth: {
-    maxAttempts: int("LOGIN_MAX_ATTEMPTS", 15),
-    lockMinutes: int("LOGIN_LOCK_MINUTES", 1540),
+    lockMinutes: int("LOGIN_LOCK_MINUTES", 15), // window, and how long a pause/lock lasts
+    maxAttempts: int("LOGIN_MAX_ATTEMPTS", 10), // per account, from one address
+    ipMaxAttempts: int("LOGIN_IP_MAX_ATTEMPTS", 100), // per address, across all accounts
+    accountMaxAttempts: int("LOGIN_ACCOUNT_MAX_ATTEMPTS", 50), // per account, all addresses, in a row (0 = off)
     cookieName: "ap_admin_session",
+  },
+
+  http: {
+    // Which proxies may report the client address (X-Forwarded-For). The
+    // default trusts nginx on this host and an AWS load balancer in the VPC,
+    // and stops at the first public address, which is the visitor's.
+    trustProxy: trustProxy(optional("TRUST_PROXY", "loopback, linklocal, uniquelocal")),
+    // General API requests per 15 minutes: per signed-in account, otherwise
+    // per address.
+    rateLimit: int("API_RATE_LIMIT", 1000),
   },
 
   cors: {

@@ -1,7 +1,6 @@
 import { Router } from "express";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
-import rateLimit from "express-rate-limit";
 import { z } from "zod";
 import { query, queryOne } from "../../db/pool.js";
 import { env } from "../../config/env.js";
@@ -9,16 +8,27 @@ import { requireAuth, tokenFrom } from "../../middleware/auth.js";
 import { asyncHandler, AppError, conflict, parseOrThrow, success, unauthorized } from "../../lib/errors.js";
 import { requiredString } from "../../lib/validators.js";
 import { audit } from "../../lib/audit.js";
+import { createLoginGuard } from "./loginGuard.js";
 
 const router = Router();
 
-const loginLimit = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: env.isTest ? 1000 : 20,
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: { error: { code: "RATE_LIMITED", message: "Too many sign-in attempts. Please try again later." } },
+const loginGuard = createLoginGuard({
+  windowMinutes: env.auth.lockMinutes,
+  maxPerAccount: env.auth.maxAttempts,
+  maxPerAddress: env.auth.ipMaxAttempts,
+  warnOnProxyAddress: env.isProd,
 });
+
+// Counts a wrong password against the account itself, whatever address it came
+// from; LOGIN_ACCOUNT_MAX_ATTEMPTS in a row lock it for LOGIN_LOCK_MINUTES (the
+// backstop against guessing spread over many addresses). One statement, so
+// simultaneous attempts cannot overwrite each other's count.
+const RECORD_FAILURE = `
+  UPDATE admin_users
+     SET failed_attempts = CASE WHEN $2::int > 0 AND failed_attempts + 1 >= $2::int THEN 0 ELSE failed_attempts + 1 END,
+         locked_until    = CASE WHEN $2::int > 0 AND failed_attempts + 1 >= $2::int
+                                THEN NOW() + make_interval(mins => $3::int) ELSE locked_until END
+   WHERE id = $1`;
 
 const loginSchema = z.object({
   email: z.string().trim().toLowerCase().email("Enter a valid email address").max(255),
@@ -58,14 +68,14 @@ const DUMMY_HASH = bcrypt.hashSync("not-a-real-password", 10);
 
 router.post(
   "/login",
-  loginLimit,
+  loginGuard.middleware,
   asyncHandler(async (req, res) => {
     const parsed = loginSchema.safeParse(req.body);
     if (!parsed.success) throw unauthorized("Invalid email or password");
     const { email, password } = parsed.data;
 
     const user = await queryOne(
-      `SELECT id, email, name, role, avatar_url, district_id, division, password_hash, is_active, failed_attempts, locked_until
+      `SELECT id, email, name, role, avatar_url, district_id, division, password_hash, is_active, locked_until
          FROM admin_users WHERE LOWER(email) = $1 AND deleted_at IS NULL`,
       [email]
     );
@@ -75,21 +85,17 @@ router.post(
       throw unauthorized("Invalid email or password");
     }
     if (user.locked_until && new Date(user.locked_until) > new Date()) {
-      const minutes = Math.ceil((new Date(user.locked_until) - Date.now()) / 60000);
-      throw new AppError("ACCOUNT_LOCKED", `Too many failed attempts. Try again in ${minutes} minute(s).`, 423);
+      const minutes = Math.max(1, Math.ceil((new Date(user.locked_until) - Date.now()) / 60000));
+      throw new AppError(
+        "ACCOUNT_LOCKED",
+        `This account is temporarily locked after repeated failed sign-ins. Try again in ${minutes} minute(s), or ask a super admin to reset the password.`,
+        423
+      );
     }
 
     const match = await bcrypt.compare(password, user.password_hash);
     if (!match) {
-      const attempts = user.failed_attempts + 1;
-      const lock = attempts >= env.auth.maxAttempts;
-      await query(
-        `UPDATE admin_users
-            SET failed_attempts = $1,
-                locked_until = CASE WHEN $2 THEN NOW() + ($3 || ' minutes')::INTERVAL ELSE locked_until END
-          WHERE id = $4`,
-        [lock ? 0 : attempts, lock, String(env.auth.lockMinutes), user.id]
-      );
+      await query(RECORD_FAILURE, [user.id, env.auth.accountMaxAttempts, env.auth.lockMinutes]);
       throw unauthorized("Invalid email or password");
     }
     if (!user.is_active) throw unauthorized("This account is disabled. Contact a super admin.");
@@ -98,6 +104,7 @@ router.post(
       "UPDATE admin_users SET failed_attempts = 0, locked_until = NULL, last_login_at = NOW() WHERE id = $1",
       [user.id]
     );
+    await loginGuard.succeeded(req);
 
     const expiresAt = new Date(Date.now() + env.jwt.sessionHours * 3600 * 1000);
     const session = await queryOne(

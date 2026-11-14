@@ -17,6 +17,8 @@ process.env.SEED_ADMIN_EMAIL = "admin@test.local";
 process.env.SEED_ADMIN_PASSWORD = "Admin@12345";
 process.env.UPLOAD_DIR = mkdtempSync(path.join(os.tmpdir(), "ap-uploads-"));
 process.env.LOGIN_MAX_ATTEMPTS = "3";
+process.env.LOGIN_ACCOUNT_MAX_ATTEMPTS = "5";
+process.env.LOGIN_LOCK_MINUTES = "15";
 
 const PNG_1PX = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
@@ -318,13 +320,52 @@ test("roles: editors edit content but cannot delete, change settings or manage u
   assert.equal((await call("DELETE", `/admin/users/${me.id}`)).status, 403);
 });
 
-test("login lockout after repeated failures", async () => {
+test("signing in again and again with several accounts is never throttled", async () => {
+  const accounts = [{ email: "admin@test.local", password: "Admin@12345" }];
+  for (const [n, role] of [[1, "admin"], [2, "editor"], [3, "editor"]]) {
+    const body = { name: `Tester ${n}`, email: `tester${n}@test.local`, role, password: `Tester${n}pass` };
+    assert.equal((await call("POST", "/admin/users", { body })).status, 201);
+    accounts.push({ email: body.email, password: body.password });
+  }
+  for (let i = 0; i < 30; i += 1) {
+    const r = await call("POST", "/auth/login", { auth: null, body: accounts[i % accounts.length] });
+    assert.equal(r.status, 200, `sign-in ${i + 1}: ${r.body.error?.message}`);
+  }
+});
+
+test("wrong passwords pause only that account from that address", async () => {
   await call("POST", "/admin/users", { body: { name: "Lock Test", email: "lock@test.local", role: "editor", password: "Lockme123" } });
   for (let i = 0; i < 3; i += 1) {
-    await call("POST", "/auth/login", { auth: null, body: { email: "lock@test.local", password: "wrong-pass-1" } });
+    const r = await call("POST", "/auth/login", { auth: null, body: { email: "lock@test.local", password: "wrong-pass-1" } });
+    assert.equal(r.status, 401);
   }
-  const locked = await call("POST", "/auth/login", { auth: null, body: { email: "lock@test.local", password: "Lockme123" } });
+  const paused = await call("POST", "/auth/login", { auth: null, body: { email: "lock@test.local", password: "Lockme123" } });
+  assert.equal(paused.status, 429);
+  assert.equal(paused.body.error.code, "RATE_LIMITED");
+  // Someone else signing in from the same connection is unaffected.
+  const other = await call("POST", "/auth/login", { auth: null, body: { email: "tester1@test.local", password: "Tester1pass" } });
+  assert.equal(other.status, 200);
+});
+
+test("an account guessed at from many addresses is locked briefly, and the right password then works again", async () => {
+  await call("POST", "/admin/users", { body: { name: "Backstop", email: "backstop@test.local", role: "editor", password: "Backstop123" } });
+  // Four failures already recorded from elsewhere; the fifth in a row locks.
+  await pool.query("UPDATE admin_users SET failed_attempts = 4 WHERE email = 'backstop@test.local'");
+  const fifth = await call("POST", "/auth/login", { auth: null, body: { email: "backstop@test.local", password: "nope-nope-1" } });
+  assert.equal(fifth.status, 401);
+
+  const locked = await call("POST", "/auth/login", { auth: null, body: { email: "backstop@test.local", password: "Backstop123" } });
   assert.equal(locked.status, 423);
+  assert.match(locked.body.error.message, /Try again in 15 minute/);
+  const { rows } = await pool.query(
+    "SELECT EXTRACT(EPOCH FROM locked_until - NOW()) / 60 AS minutes, failed_attempts FROM admin_users WHERE email = 'backstop@test.local'"
+  );
+  assert.ok(Number(rows[0].minutes) <= 15, "locked for LOGIN_LOCK_MINUTES, not a day");
+  assert.equal(rows[0].failed_attempts, 0);
+
+  await pool.query("UPDATE admin_users SET locked_until = NOW() - INTERVAL '1 second' WHERE email = 'backstop@test.local'");
+  const after = await call("POST", "/auth/login", { auth: null, body: { email: "backstop@test.local", password: "Backstop123" } });
+  assert.equal(after.status, 200);
 });
 
 test("audit log records admin actions; logout revokes the session", async () => {

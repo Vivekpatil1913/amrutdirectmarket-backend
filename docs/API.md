@@ -48,13 +48,23 @@ Every response carries an `X-Request-Id` header; unexpected errors are logged wi
 
 | Method | Path | Auth | Description |
 |---|---|---|---|
-| POST | `/auth/login` | – | `{ email, password }` → `{ token, expiresAt, user }`. Rate-limited; locks the account for `LOGIN_LOCK_MINUTES` after `LOGIN_MAX_ATTEMPTS` failures (`423`). |
+| POST | `/auth/login` | – | `{ email, password }` → `{ token, expiresAt, user }`. Only wrong passwords are limited (see below); a correct one is never counted or refused. |
 | POST | `/auth/logout` | – | Revokes the session. |
 | GET | `/auth/me` | any | Current user. |
 | PUT | `/auth/profile` | any | `{ name, email }` |
 | POST | `/auth/change-password` | any | `{ currentPassword, newPassword }` (≥ 8 chars, letter + number). Signs out other sessions. |
 
 Sessions are stored in `admin_sessions`, expire after `SESSION_HOURS` of inactivity (sliding) and are revoked on logout, password change, account disable or delete.
+
+**Sign-in protection** counts failed sign-ins (`401`) only, within a `LOGIN_LOCK_MINUTES` window (default 15). A correct password clears that account's count for that address.
+
+| Limit | Default | Response |
+|---|---|---|
+| One account, one address: `LOGIN_MAX_ATTEMPTS` | 10 | `429`, that account paused for that address only |
+| One address, all accounts: `LOGIN_IP_MAX_ATTEMPTS` | 100 | `429` |
+| One account, all addresses, in a row: `LOGIN_ACCOUNT_MAX_ATTEMPTS` (`0` = off) | 50 | `423`, account locked for `LOGIN_LOCK_MINUTES` (shown as *Locked* in Users; resetting the password unlocks it) |
+
+Sign-in is exempt from the general API limit (`API_RATE_LIMIT` per 15 min, counted per signed-in account, otherwise per address). Limits rely on the client address: behind nginx set `proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;` (`TRUST_PROXY` defaults to `loopback, linklocal, uniquelocal`).
 
 ## Admin
 
